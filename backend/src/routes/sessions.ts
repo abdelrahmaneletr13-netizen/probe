@@ -2,7 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { MemoryStore } from "../services/store.js";
+import type { PgStore } from "../services/pgStore.js";
 import { validateTarget, TargetError } from "../services/targetGuard.js";
+
+type AnyStore = MemoryStore | PgStore;
 
 const CreateSchema = z.object({
   name: z.string().min(1).max(120),
@@ -11,7 +14,7 @@ const CreateSchema = z.object({
 
 export function registerSessionRoutes(
   app: FastifyInstance,
-  store: MemoryStore,
+  store: AnyStore,
   config: AppConfig,
 ) {
   app.post("/v1/sessions", async (req, reply) => {
@@ -32,7 +35,7 @@ export function registerSessionRoutes(
       }
     }
 
-    const session = store.createSession({
+    const session = await store.createSession({
       name: parsed.data.name,
       scope: validatedScope,
       apiKey: req.apiKey,
@@ -41,11 +44,11 @@ export function registerSessionRoutes(
   });
 
   app.get("/v1/sessions", async (req) => ({
-    sessions: store.listSessions(req.apiKey),
+    sessions: await store.listSessions(req.apiKey),
   }));
 
   app.get<{ Params: { id: string } }>("/v1/sessions/:id", async (req, reply) => {
-    const session = store.getSession(req.params.id);
+    const session = await store.getSession(req.params.id);
     if (!session || session.apiKey !== req.apiKey) {
       return reply.code(404).send({ error: "not_found" });
     }
@@ -53,11 +56,11 @@ export function registerSessionRoutes(
   });
 
   app.delete<{ Params: { id: string } }>("/v1/sessions/:id", async (req, reply) => {
-    const session = store.getSession(req.params.id);
+    const session = await store.getSession(req.params.id);
     if (!session || session.apiKey !== req.apiKey) {
       return reply.code(404).send({ error: "not_found" });
     }
-    store.deleteSession(req.params.id);
+    await store.deleteSession(req.params.id);
     return reply.code(204).send();
   });
 }

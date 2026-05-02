@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { BackendClient } from "./api/client.js";
 import { registerCommands } from "./commands.js";
+import { FindingsStore } from "./findings/store.js";
 import { OutputManager } from "./output.js";
 import { SessionManager } from "./session/manager.js";
 import { RunsTreeProvider } from "./views/runsView.js";
@@ -11,6 +12,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const client = new BackendClient(readConfig());
   const manager = new SessionManager(client);
   const output = new OutputManager(context);
+  const findings = new FindingsStore(context);
 
   const sessions = new SessionsTreeProvider(manager);
   const tools = new ToolsTreeProvider(manager);
@@ -25,7 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  registerCommands(context, client, manager, output, async () => {
+  registerCommands(context, client, manager, output, findings, async () => {
     client.update(readConfig());
   });
 

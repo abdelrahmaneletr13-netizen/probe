@@ -3,8 +3,12 @@ import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import type { RunManager } from "../services/runManager.js";
 import type { MemoryStore } from "../services/store.js";
+import type { PgStore } from "../services/pgStore.js";
 import { TargetError, validateTarget } from "../services/targetGuard.js";
 import { findTool } from "../tools/registry.js";
+import type { RunRecord, Session } from "../types.js";
+
+type AnyStore = MemoryStore | PgStore;
 
 const StartSchema = z.object({
   toolId: z.string().min(1),
@@ -14,12 +18,12 @@ const StartSchema = z.object({
 
 export function registerRunRoutes(
   app: FastifyInstance,
-  store: MemoryStore,
+  store: AnyStore,
   runs: RunManager,
   config: AppConfig,
 ) {
   app.post<{ Params: { id: string } }>("/v1/sessions/:id/runs", async (req, reply) => {
-    const session = store.getSession(req.params.id);
+    const session = await store.getSession(req.params.id);
     if (!session || session.apiKey !== req.apiKey) {
       return reply.code(404).send({ error: "session_not_found" });
     }
@@ -48,29 +52,29 @@ export function registerRunRoutes(
     }
 
     const command = [tool.binary, ...tool.buildCommand(target, parsed.data.args)];
-    const record = store.createRun({
+    const record = await store.createRun({
       sessionId: session.id,
       toolId: tool.id,
       target,
       args: parsed.data.args,
       command,
     });
-    const started = runs.start(record);
+    const started = await runs.start(record);
     return reply.code(202).send(started);
   });
 
   app.get<{ Params: { id: string } }>("/v1/sessions/:id/runs", async (req, reply) => {
-    const session = store.getSession(req.params.id);
+    const session = await store.getSession(req.params.id);
     if (!session || session.apiKey !== req.apiKey) {
       return reply.code(404).send({ error: "session_not_found" });
     }
-    return { runs: store.listRuns(session.id) };
+    return { runs: await store.listRuns(session.id) };
   });
 
   app.get<{ Params: { id: string; runId: string } }>(
     "/v1/sessions/:id/runs/:runId",
     async (req, reply) => {
-      const run = assertOwned(req, reply, store);
+      const run = await assertOwned(req, reply, store);
       if (!run) return;
       return run;
     },
@@ -79,7 +83,7 @@ export function registerRunRoutes(
   app.delete<{ Params: { id: string; runId: string } }>(
     "/v1/sessions/:id/runs/:runId",
     async (req, reply) => {
-      const run = assertOwned(req, reply, store);
+      const run = await assertOwned(req, reply, store);
       if (!run) return;
       const cancelled = runs.cancel(run.id);
       return reply.code(cancelled ? 202 : 409).send({ cancelled });
@@ -89,7 +93,7 @@ export function registerRunRoutes(
   app.get<{ Params: { id: string; runId: string } }>(
     "/v1/sessions/:id/runs/:runId/stream",
     async (req, reply) => {
-      const run = assertOwned(req, reply, store);
+      const run = await assertOwned(req, reply, store);
       if (!run) return;
 
       reply.raw.writeHead(200, {
@@ -108,8 +112,10 @@ export function registerRunRoutes(
         run.id,
         (chunk) => send("chunk", chunk),
         () => {
-          send("end", store.getRun(run.id));
-          reply.raw.end();
+          store.getRun(run.id).then((finalRun) => {
+            send("end", finalRun ?? run);
+            reply.raw.end();
+          });
         },
       );
 
@@ -124,17 +130,17 @@ export function registerRunRoutes(
   );
 }
 
-function assertOwned(
+async function assertOwned(
   req: { params: { id: string; runId: string }; apiKey: string },
   reply: { code: (n: number) => { send: (b: unknown) => unknown } },
-  store: MemoryStore,
-) {
-  const session = store.getSession(req.params.id);
+  store: AnyStore,
+): Promise<RunRecord | undefined> {
+  const session: Session | undefined = await store.getSession(req.params.id);
   if (!session || session.apiKey !== req.apiKey) {
     reply.code(404).send({ error: "session_not_found" });
     return undefined;
   }
-  const run = store.getRun(req.params.runId);
+  const run: RunRecord | undefined = await store.getRun(req.params.runId);
   if (!run || run.sessionId !== session.id) {
     reply.code(404).send({ error: "run_not_found" });
     return undefined;

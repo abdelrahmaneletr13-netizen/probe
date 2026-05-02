@@ -35,7 +35,10 @@
       { "command": "pentestIde.refresh", "title": "Pentest IDE: Refresh" },
       { "command": "pentestIde.runTool", "title": "Pentest IDE: Run tool" },
       { "command": "pentestIde.cancelRun", "title": "Pentest IDE: Cancel run" },
-      { "command": "pentestIde.openRunOutput", "title": "Pentest IDE: Open run output" }
+      { "command": "pentestIde.openRunOutput", "title": "Pentest IDE: Open run output" },
+      { "command": "pentestIde.openFindings", "title": "Pentest IDE: Open findings" },
+      { "command": "pentestIde.addFinding", "title": "Pentest IDE: Add finding from run" },
+      { "command": "pentestIde.exportFindings", "title": "Pentest IDE: Export findings (Markdown)" }
     ],
     "menus": {
       "view/title": [
@@ -46,7 +49,8 @@
         { "command": "pentestIde.deleteSession", "when": "view == pentestIde.sessions && viewItem == session" },
         { "command": "pentestIde.runTool", "when": "view == pentestIde.tools && viewItem == tool" },
         { "command": "pentestIde.cancelRun", "when": "view == pentestIde.runs && viewItem == run" },
-        { "command": "pentestIde.openRunOutput", "when": "view == pentestIde.runs && viewItem == run" }
+        { "command": "pentestIde.openRunOutput", "when": "view == pentestIde.runs && viewItem == run" },
+        { "command": "pentestIde.addFinding", "when": "view == pentestIde.runs && viewItem == run" }
       ]
     },
     "configuration": {

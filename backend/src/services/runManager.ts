@@ -3,6 +3,9 @@ import type { AppConfig } from "../config.js";
 import type { RunChunk, RunRecord, RunStatus } from "../types.js";
 import type { Executor, ExecutorHandle } from "./executor.js";
 import type { MemoryStore } from "./store.js";
+import type { PgStore } from "./pgStore.js";
+
+type AnyStore = MemoryStore | PgStore;
 
 interface ActiveRun {
   handle: ExecutorHandle;
@@ -20,14 +23,14 @@ export class RunManager {
   private inFlight = 0;
 
   constructor(
-    private store: MemoryStore,
+    private store: AnyStore,
     private executor: Executor,
     private config: AppConfig,
   ) {}
 
-  start(run: RunRecord): RunRecord {
+  async start(run: RunRecord): Promise<RunRecord> {
     if (this.inFlight >= this.config.maxConcurrentRuns) {
-      const updated = this.store.updateRun(run.id, {
+      const updated = await this.store.updateRun(run.id, {
         status: "failed",
         error: "Server is at max concurrent runs, try again shortly",
         finishedAt: new Date().toISOString(),
@@ -36,7 +39,7 @@ export class RunManager {
     }
 
     this.inFlight += 1;
-    const updated = this.store.updateRun(run.id, { status: "running" }) ?? run;
+    const updated = (await this.store.updateRun(run.id, { status: "running" })) ?? run;
     const emitter = new EventEmitter();
     const chunks: RunChunk[] = [];
 
@@ -58,11 +61,13 @@ export class RunManager {
             ? "cancelled"
             : "failed";
 
-      this.store.updateRun(run.id, {
-        status,
-        exitCode: code,
-        finishedAt: new Date().toISOString(),
-      });
+      this.store
+        .updateRun(run.id, {
+          status,
+          exitCode: code,
+          finishedAt: new Date().toISOString(),
+        })
+        .catch(() => undefined);
 
       const entry = this.active.get(run.id);
       if (entry) entry.done = true;

@@ -1,14 +1,20 @@
 import * as vscode from "vscode";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { BackendError, type BackendClient } from "./api/client.js";
 import type { RunRecord, Session, ToolDescriptor } from "./api/types.js";
 import type { SessionManager } from "./session/manager.js";
 import type { OutputManager } from "./output.js";
+import type { FindingsStore } from "./findings/store.js";
+import { FindingsPanel } from "./findings/panel.js";
+import type { Severity } from "./findings/types.js";
 
 export function registerCommands(
   context: vscode.ExtensionContext,
   client: BackendClient,
   manager: SessionManager,
   output: OutputManager,
+  findings: FindingsStore,
   refreshConfig: () => Promise<void>,
 ) {
   const reg = (id: string, fn: (...args: unknown[]) => Promise<void>) =>
@@ -134,6 +140,74 @@ export function registerCommands(
     const run = pickRun(args);
     if (!run) return;
     output.channelFor(run).show(true);
+  });
+
+  reg("pentestIde.openFindings", async () => {
+    FindingsPanel.open(context, findings);
+  });
+
+  reg("pentestIde.addFinding", async (...args) => {
+    const run = pickRun(args);
+    const sessions = manager.getSessions();
+    const session = run
+      ? sessions.find((s) => s.id === run.sessionId)
+      : undefined;
+
+    const title = await vscode.window.showInputBox({
+      prompt: "Finding title",
+      placeHolder: "e.g. Open port 8080 — Tomcat manager exposed",
+      ignoreFocusOut: true,
+    });
+    if (!title) return;
+
+    const severityPick = await vscode.window.showQuickPick(
+      ["critical", "high", "medium", "low", "info"] as Severity[],
+      { placeHolder: "Severity" },
+    );
+    if (!severityPick) return;
+
+    const notes = await vscode.window.showInputBox({
+      prompt: "Notes (optional)",
+      ignoreFocusOut: true,
+    });
+
+    findings.add({
+      sessionId: session?.id ?? run?.sessionId ?? "unknown",
+      runId: run?.id ?? "manual",
+      toolId: run?.toolId ?? "manual",
+      target: run?.target ?? "unknown",
+      title,
+      severity: severityPick as Severity,
+      notes: notes ?? "",
+    });
+    vscode.window.showInformationMessage(`Finding "${title}" recorded.`);
+    FindingsPanel.open(context, findings);
+  });
+
+  reg("pentestIde.exportFindings", async () => {
+    const all = findings.getAll();
+    if (all.length === 0) {
+      vscode.window.showInformationMessage("No findings to export.");
+      return;
+    }
+    const md = [
+      "# Pentest Findings\n",
+      `_exported ${new Date().toISOString()}_\n`,
+      "| Severity | Target | Tool | Title | Notes |",
+      "| --- | --- | --- | --- | --- |",
+      ...all.map((f) =>
+        `| **${f.severity}** | ${f.target} | ${f.toolId} | ${f.title} | ${f.notes.replace(/\n/g, "<br>")} |`,
+      ),
+    ].join("\n");
+
+    const dest = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(path.join(process.env.HOME ?? "~", "findings.md")),
+      filters: { Markdown: ["md"] },
+    });
+    if (!dest) return;
+    fs.writeFileSync(dest.fsPath, md, "utf-8");
+    vscode.window.showInformationMessage(`Findings exported to ${dest.fsPath}`);
+    vscode.env.openExternal(dest);
   });
 }
 

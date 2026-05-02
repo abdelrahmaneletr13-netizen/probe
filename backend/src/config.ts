@@ -15,6 +15,13 @@ const EnvSchema = z.object({
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),
+  DATABASE_URL: z.string().optional(),
+  DOCKER_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  TOOLS_IMAGE: z.string().default("pentest-ide/tools:latest"),
+  DOCKER_SOCKET: z.string().default("/var/run/docker.sock"),
 });
 
 export interface AppConfig {
@@ -26,6 +33,10 @@ export interface AppConfig {
   requirePublicTargets: boolean;
   targetAllowlist: string[];
   logPretty: boolean;
+  databaseUrl?: string;
+  dockerEnabled: boolean;
+  toolsImage: string;
+  dockerSocket: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -45,5 +56,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .map((t) => t.trim())
       .filter(Boolean),
     logPretty: parsed.LOG_PRETTY,
+    databaseUrl: parsed.DATABASE_URL,
+    dockerEnabled: parsed.DOCKER_ENABLED,
+    toolsImage: parsed.TOOLS_IMAGE,
+    dockerSocket: parsed.DOCKER_SOCKET,
   };
 }
