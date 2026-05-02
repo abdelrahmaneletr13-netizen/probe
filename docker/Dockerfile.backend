@@ -13,7 +13,7 @@ FROM debian:bookworm-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=8787 \
+    PORT=10000 \
     LOG_PRETTY=false
 
 RUN apt-get update \
@@ -40,8 +40,8 @@ COPY backend/package.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 COPY --from=build /app/dist ./dist
 
-EXPOSE 8787
+EXPOSE 10000
 USER 1000:1000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8787/healthz || exit 1
+  CMD curl -fsS http://127.0.0.1:${PORT:-10000}/healthz || exit 1
 CMD ["node", "dist/index.js"]

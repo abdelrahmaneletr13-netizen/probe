@@ -13,6 +13,8 @@ services:
       REQUIRE_PUBLIC_TARGETS: ${REQUIRE_PUBLIC_TARGETS:-false}
       TARGET_ALLOWLIST: ${TARGET_ALLOWLIST:-}
       LOG_PRETTY: "false"
+      PORT: "8787"
+      HOST: "0.0.0.0"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/healthz"]
