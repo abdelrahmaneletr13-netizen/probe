@@ -29,6 +29,7 @@
       ]
     },
     "commands": [
+      { "command": "pentestIde.openChat", "title": "Pentest IDE: Open chat", "icon": "$(comment-discussion)" },
       { "command": "pentestIde.signIn", "title": "Pentest IDE: Connect to backend" },
       { "command": "pentestIde.createSession", "title": "Pentest IDE: New session" },
       { "command": "pentestIde.deleteSession", "title": "Pentest IDE: Delete session" },
@@ -42,8 +43,9 @@
     ],
     "menus": {
       "view/title": [
-        { "command": "pentestIde.refresh", "when": "view == pentestIde.sessions", "group": "navigation" },
-        { "command": "pentestIde.createSession", "when": "view == pentestIde.sessions", "group": "navigation" }
+        { "command": "pentestIde.openChat", "when": "view == pentestIde.sessions", "group": "navigation@1" },
+        { "command": "pentestIde.createSession", "when": "view == pentestIde.sessions", "group": "navigation@2" },
+        { "command": "pentestIde.refresh", "when": "view == pentestIde.sessions", "group": "navigation@3" }
       ],
       "view/item/context": [
         { "command": "pentestIde.deleteSession", "when": "view == pentestIde.sessions && viewItem == session" },

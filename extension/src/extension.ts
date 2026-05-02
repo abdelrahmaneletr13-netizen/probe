@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { BackendClient } from "./api/client.js";
+import { ChatPanel } from "./chat/panel.js";
 import { registerCommands } from "./commands.js";
 import { FindingsStore } from "./findings/store.js";
 import { OutputManager } from "./output.js";
@@ -18,6 +19,10 @@ export async function activate(context: vscode.ExtensionContext) {
   const tools = new ToolsTreeProvider(manager);
   const runs = new RunsTreeProvider(manager);
 
+  const refreshConfig = async () => {
+    client.update(readConfig());
+  };
+
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("pentestIde.sessions", sessions),
     vscode.window.registerTreeDataProvider("pentestIde.tools", tools),
@@ -25,20 +30,35 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("pentestIde")) client.update(readConfig());
     }),
+    vscode.commands.registerCommand("pentestIde.openChat", () => {
+      ChatPanel.open({
+        client,
+        manager,
+        output,
+        findings,
+        context,
+        refreshConfig,
+      });
+    }),
   );
 
-  registerCommands(context, client, manager, output, findings, async () => {
-    client.update(readConfig());
-  });
+  registerCommands(context, client, manager, output, findings, refreshConfig);
 
   if (readConfig().apiKey) {
     manager.refresh().catch((err) => {
       vscode.window.showWarningMessage(`Pentest IDE: initial refresh failed (${(err as Error).message})`);
     });
   } else {
-    vscode.window.showInformationMessage(
-      "Pentest IDE is installed. Run 'Pentest IDE: Connect to backend' to get started.",
-    );
+    vscode.window
+      .showInformationMessage(
+        "Pentest IDE is installed. Open the chat to get started.",
+        "Open Chat",
+      )
+      .then((choice) => {
+        if (choice === "Open Chat") {
+          vscode.commands.executeCommand("pentestIde.openChat");
+        }
+      });
   }
 }
 

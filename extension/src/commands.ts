@@ -42,8 +42,14 @@ export function registerCommands(
     });
     if (!apiKey) return;
 
+    const normalizedUrl = normalizeBackendUrl(url.trim());
+    if (!normalizedUrl) {
+      vscode.window.showErrorMessage("Pentest IDE: Invalid backend URL. Use http://localhost:8787");
+      return;
+    }
+
     const cfg = vscode.workspace.getConfiguration("pentestIde");
-    await cfg.update("backendUrl", url.trim(), vscode.ConfigurationTarget.Global);
+    await cfg.update("backendUrl", normalizedUrl, vscode.ConfigurationTarget.Global);
     await cfg.update("apiKey", apiKey.trim(), vscode.ConfigurationTarget.Global);
     await refreshConfig();
     await manager.refresh();
@@ -298,5 +304,18 @@ function showError(err: unknown) {
     vscode.window.showErrorMessage(`Pentest IDE: ${err.message}`);
   } else {
     vscode.window.showErrorMessage("Pentest IDE: unknown error");
+  }
+}
+
+function normalizeBackendUrl(value: string): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.replace(/\/+$|\s+/g, "");
+  const url = /^https?:\/\//i.test(normalized) ? normalized : `http://${normalized}`;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    return parsed.href.replace(/\/+$/, "");
+  } catch {
+    return undefined;
   }
 }
