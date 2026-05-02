@@ -1,7 +1,7 @@
 services:
   - type: web
     name: pentest-ide-backend
-    runtime: docker
+    env: docker
     dockerfilePath: docker/Dockerfile.backend
     dockerContext: .
     plan: free
