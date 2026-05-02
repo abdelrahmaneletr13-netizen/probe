@@ -58,7 +58,7 @@
       "properties": {
         "pentestIde.backendUrl": {
           "type": "string",
-          "default": "https://pentest-ide.fly.dev",
+          "default": "https://pentest-ide-backend.onrender.com",
           "description": "Base URL of the Pentest IDE backend."
         },
         "pentestIde.apiKey": {

@@ -2,6 +2,8 @@
 
 A small **plug-and-play** workbench for security testing from inside your editor.
 
+> 🚀 **Live demo**: https://pentest-ide-backend.onrender.com — open in any browser, no install needed.
+
 ```
 ┌─────────────────────────┐         HTTPS + SSE          ┌────────────────────────────┐
 │ VS Code / Cursor        │ ───────────────────────────► │ Cloud backend (Fastify)    │
