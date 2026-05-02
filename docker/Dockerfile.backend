@@ -27,9 +27,16 @@ RUN apt-get update \
       unzip \
       git \
       dnsutils \
+      whois \
+      bash \
       nmap \
       whatweb \
       perl \
+      libnet-ssleay-perl \
+      libjson-perl \
+      libxml-writer-perl \
+      libio-socket-ssl-perl \
+      libwww-perl \
       libnet-ssleay-perl \
       openssl \
       nodejs \
