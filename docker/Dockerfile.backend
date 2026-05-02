@@ -17,14 +17,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOST=0.0.0.0 \
     PORT=10000 \
     LOG_PRETTY=false \
-    GOBIN=/usr/local/bin \
-    GOPATH=/tmp/go
+    HTTPX_VERSION=1.6.10
 
 # System tools available in Debian bookworm
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
+      unzip \
       git \
       dnsutils \
       nmap \
@@ -32,7 +32,6 @@ RUN apt-get update \
       perl \
       libnet-ssleay-perl \
       openssl \
-      golang-go \
       nodejs \
       npm \
  && rm -rf /var/lib/apt/lists/*
@@ -42,10 +41,20 @@ RUN git clone --depth=1 https://github.com/sullo/nikto /opt/nikto \
  && chmod +x /opt/nikto/program/nikto.pl \
  && ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto
 
-# httpx — projectdiscovery Go binary
-RUN go install github.com/projectdiscovery/httpx/cmd/httpx@latest \
- && rm -rf /tmp/go /root/.cache \
- && apt-get purge -y golang-go git \
+# httpx — pre-built binary from projectdiscovery (multi-arch)
+RUN ARCH="$(uname -m)" \
+ && case "$ARCH" in \
+      x86_64)  HTTPX_ARCH=amd64 ;; \
+      aarch64) HTTPX_ARCH=arm64 ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/httpx.zip \
+      "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_${HTTPX_ARCH}.zip" \
+ && unzip -q /tmp/httpx.zip -d /tmp/httpx \
+ && mv /tmp/httpx/httpx /usr/local/bin/httpx \
+ && chmod +x /usr/local/bin/httpx \
+ && rm -rf /tmp/httpx /tmp/httpx.zip \
+ && apt-get purge -y unzip git \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
