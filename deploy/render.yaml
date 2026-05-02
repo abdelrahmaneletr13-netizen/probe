@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: pentest-ide-backend
+    env: docker
+    dockerfilePath: docker/Dockerfile.backend
+    plan: starter
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PENTEST_IDE_API_KEYS
+        sync: false
+      - key: REQUIRE_PUBLIC_TARGETS
+        value: "true"
+      - key: LOG_PRETTY
+        value: "false"
+      - key: PORT
+        value: "8787"

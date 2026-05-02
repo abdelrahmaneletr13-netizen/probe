@@ -1,0 +1,89 @@
+{
+  "name": "pentest-ide",
+  "displayName": "Pentest IDE",
+  "description": "Run cloud-hosted reconnaissance and scanning tools from your editor.",
+  "version": "0.1.0",
+  "publisher": "pentest-ide",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pentestIde",
+          "title": "Pentest IDE",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "pentestIde": [
+        { "id": "pentestIde.sessions", "name": "Sessions" },
+        { "id": "pentestIde.tools", "name": "Tools" },
+        { "id": "pentestIde.runs", "name": "Recent runs" }
+      ]
+    },
+    "commands": [
+      { "command": "pentestIde.signIn", "title": "Pentest IDE: Connect to backend" },
+      { "command": "pentestIde.createSession", "title": "Pentest IDE: New session" },
+      { "command": "pentestIde.deleteSession", "title": "Pentest IDE: Delete session" },
+      { "command": "pentestIde.refresh", "title": "Pentest IDE: Refresh" },
+      { "command": "pentestIde.runTool", "title": "Pentest IDE: Run tool" },
+      { "command": "pentestIde.cancelRun", "title": "Pentest IDE: Cancel run" },
+      { "command": "pentestIde.openRunOutput", "title": "Pentest IDE: Open run output" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "pentestIde.refresh", "when": "view == pentestIde.sessions", "group": "navigation" },
+        { "command": "pentestIde.createSession", "when": "view == pentestIde.sessions", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "pentestIde.deleteSession", "when": "view == pentestIde.sessions && viewItem == session" },
+        { "command": "pentestIde.runTool", "when": "view == pentestIde.tools && viewItem == tool" },
+        { "command": "pentestIde.cancelRun", "when": "view == pentestIde.runs && viewItem == run" },
+        { "command": "pentestIde.openRunOutput", "when": "view == pentestIde.runs && viewItem == run" }
+      ]
+    },
+    "configuration": {
+      "title": "Pentest IDE",
+      "properties": {
+        "pentestIde.backendUrl": {
+          "type": "string",
+          "default": "https://pentest-ide.fly.dev",
+          "description": "Base URL of the Pentest IDE backend."
+        },
+        "pentestIde.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the backend. Use the 'Connect to backend' command to set securely.",
+          "scope": "machine"
+        },
+        "pentestIde.requestTimeoutMs": {
+          "type": "number",
+          "default": 15000,
+          "description": "HTTP request timeout in milliseconds."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs --target=node18 --sourcemap",
+    "watch": "npm run build -- --watch",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.3",
+    "vitest": "^2.0.5"
+  }
+}

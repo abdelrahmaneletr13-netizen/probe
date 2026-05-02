@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    image: pentest-ide/backend:dev
+    ports:
+      - "8787:8787"
+    environment:
+      PENTEST_IDE_API_KEYS: ${PENTEST_IDE_API_KEYS:-dev-key-change-me}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-4}
+      RUN_TIMEOUT_SECONDS: ${RUN_TIMEOUT_SECONDS:-300}
+      REQUIRE_PUBLIC_TARGETS: ${REQUIRE_PUBLIC_TARGETS:-false}
+      TARGET_ALLOWLIST: ${TARGET_ALLOWLIST:-}
+      LOG_PRETTY: "false"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

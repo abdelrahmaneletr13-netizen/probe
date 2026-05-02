@@ -1,0 +1,47 @@
+# Multi-stage: build the backend with full deps, then ship a slim runtime
+# image that ALSO contains the pentest tools, so a single container can
+# serve the API and execute scans without docker-in-docker.
+
+FROM node:20-bookworm-slim AS build
+WORKDIR /app
+COPY backend/package.json backend/tsconfig.json ./
+RUN npm install --no-audit --no-fund
+COPY backend/src ./src
+RUN npm run build
+
+FROM debian:bookworm-slim AS runtime
+ENV DEBIAN_FRONTEND=noninteractive \
+    NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=8787 \
+    LOG_PRETTY=false
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      dnsutils \
+      nmap \
+      nikto \
+      whatweb \
+      golang-go \
+      nodejs \
+      npm \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV GOBIN=/usr/local/bin GOPATH=/tmp/go
+RUN go install github.com/projectdiscovery/httpx/cmd/httpx@latest \
+ && rm -rf /tmp/go /root/.cache \
+ && apt-get purge -y golang-go \
+ && apt-get autoremove -y
+
+WORKDIR /app
+COPY backend/package.json ./
+RUN npm install --omit=dev --no-audit --no-fund
+COPY --from=build /app/dist ./dist
+
+EXPOSE 8787
+USER 1000:1000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8787/healthz || exit 1
+CMD ["node", "dist/index.js"]

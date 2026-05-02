@@ -1,0 +1,43 @@
+# fly.toml — deploy the backend to Fly.io.
+# Usage:
+#   fly launch --no-deploy --copy-config --name pentest-ide
+#   fly secrets set PENTEST_IDE_API_KEYS=$(openssl rand -hex 32)
+#   fly deploy
+
+app = "pentest-ide"
+primary_region = "iad"
+
+[build]
+  dockerfile = "../docker/Dockerfile.backend"
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8787"
+  LOG_PRETTY = "false"
+  REQUIRE_PUBLIC_TARGETS = "true"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 25
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/healthz"
+  protocol = "http"
+  timeout = "5s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

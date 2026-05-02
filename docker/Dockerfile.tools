@@ -1,0 +1,27 @@
+# Base image with the pentesting CLIs that the backend shells out to.
+# We deliberately stay on a slim Debian rather than full Kali to keep the
+# image small and the attack surface boring.
+FROM debian:bookworm-slim AS tools
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      dnsutils \
+      nmap \
+      nikto \
+      whatweb \
+      golang-go \
+ && rm -rf /var/lib/apt/lists/*
+
+# httpx (projectdiscovery) — installed via Go since the .deb is not in apt.
+ENV GOBIN=/usr/local/bin GOPATH=/tmp/go
+RUN go install github.com/projectdiscovery/httpx/cmd/httpx@latest \
+ && rm -rf /tmp/go /root/.cache
+
+# Sanity check that everything is on PATH.
+RUN nmap --version && nikto -Version && whatweb --version && httpx -version
+
+USER 1000:1000
