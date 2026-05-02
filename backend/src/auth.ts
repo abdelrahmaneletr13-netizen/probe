@@ -10,8 +10,10 @@ declare module "fastify" {
 export function registerAuth(app: FastifyInstance, config: AppConfig) {
   app.decorateRequest("apiKey", "");
 
+  const PUBLIC_GETS = new Set(["/healthz", "/", "/ui"]);
+
   app.addHook("onRequest", async (req, reply) => {
-    if (req.method === "GET" && req.url === "/healthz") return;
+    if (req.method === "GET" && PUBLIC_GETS.has(req.url)) return;
     const apiKey = readApiKey(req);
     if (!apiKey || !config.apiKeys.has(apiKey)) {
       reply.code(401).send({ error: "unauthorized" });

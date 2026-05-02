@@ -8,6 +8,7 @@ import { registerAuth } from "./auth.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerToolRoutes } from "./routes/tools.js";
 import { registerRunRoutes } from "./routes/runs.js";
+import { registerUiRoutes } from "./routes/ui.js";
 import { DockerExecutor } from "./services/dockerExecutor.js";
 import { ProcessExecutor, type Executor } from "./services/executor.js";
 import { RunManager } from "./services/runManager.js";
@@ -66,6 +67,7 @@ export async function buildServer(opts: BuildOptions): Promise<AppContext> {
   app.get("/healthz", async () => ({ status: "ok", uptime: process.uptime() }));
 
   registerAuth(app, opts.config);
+  registerUiRoutes(app);
   registerSessionRoutes(app, store, opts.config);
   registerToolRoutes(app);
   registerRunRoutes(app, store, runs, opts.config);
