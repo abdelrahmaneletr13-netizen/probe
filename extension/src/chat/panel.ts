@@ -821,8 +821,12 @@ function buildHtml(): string {
     else if (sev === 'low') pillClass = 'low';
     const card = document.createElement('div');
     card.className = 'finding-card';
+    const desc = p.description
+      ? '<p style="font-size:12px;margin:0 0 10px 0;line-height:1.45">' + escapeHtml(p.description) + '</p>'
+      : '';
     card.innerHTML =
       '<h3>' + escapeHtml(p.finding) + '</h3>' +
+      desc +
       '<div class="meta-row"><span class="sev-pill ' + pillClass + '">' + escapeHtml(p.severity) + '</span>' +
       '<span>CVSS ' + escapeHtml(p.cvss) + '</span></div>' +
       '<div style="font-size:11px;color:var(--muted);margin:0 0 4px 0">Evidence</div>' +

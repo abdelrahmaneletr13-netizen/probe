@@ -19,7 +19,6 @@ import {
 import {
   appendCurlHeadersChunk,
   clearProbeEvidence,
-  getCurlHeadersEvidence,
 } from "./probeEvidence.js";
 import { probeSetCanonicalTarget, probeCurrentTarget } from "./probeState.js";
 
@@ -34,6 +33,8 @@ export interface ReportCardPayload {
   finding: string;
   severity: string;
   cvss: string;
+  /** Optional narrative shown on the structured finding card. */
+  description?: string;
   evidence: string;
   remediation: string;
   mitre: string;
@@ -85,6 +86,8 @@ export interface RouterDeps {
  */
 export class ChatRouter {
   private activeSessionId?: string;
+  /** Latest httpx-probe stdout for judge report card evidence. */
+  private lastHttpxProbeEvidence = "";
 
   constructor(
     private bus: ChatBus,
@@ -95,6 +98,7 @@ export class ChatRouter {
 
   /** Clears credentials + probe artifacts and drops the active session pointer. */
   async performFullDemoReset(): Promise<void> {
+    this.lastHttpxProbeEvidence = "";
     await clearDemoBackendState(this.deps);
     this.activeSessionId = undefined;
     this.publishState();
@@ -206,7 +210,10 @@ export class ChatRouter {
       case "resetDemo":
         await this.performFullDemoReset();
         this.bus.resetDemoUi?.();
-        this.bus.reply("Demo reset — workspace cleared. Welcome back.", "success");
+        this.bus.reply(
+          "Demo reset — chat cleared, disconnected. Ready to re-run for the next judge.",
+          "success",
+        );
         return;
     }
   }
@@ -214,7 +221,12 @@ export class ChatRouter {
   /** Conversational niceties → keyword intent (fully offline). */
   private async handleUnknownTurn(text: string): Promise<void> {
     const relaxed = classifyConversational(text, this.deps.manager.getTools());
-    if (relaxed) {
+    if (
+      relaxed &&
+      (relaxed.kind === "greeting" ||
+        relaxed.kind === "gratitude" ||
+        relaxed.kind === "wifi_ambiguous")
+    ) {
       await this.handleConversational(relaxed);
       return;
     }
@@ -229,16 +241,7 @@ export class ChatRouter {
         for (const block of step.ux) {
           this.bus.reply(block, "success");
         }
-        const ok = await this.synchronizeBackendCredentials(
-          step.backendUrl,
-          step.backendKey,
-        );
-        if (ok) {
-          this.bus.reply(
-            `**Backend synchronized.** ${this.deps.manager.getSessions().length} session(s) · ${this.deps.manager.getTools().length} tool(s) catalogued.`,
-            "success",
-          );
-        }
+        await this.synchronizeBackendCredentials(step.backendUrl, step.backendKey);
         return;
       }
       case "bubbles_then_create_session": {
@@ -262,14 +265,18 @@ export class ChatRouter {
   }
 
   private emitReportCard(): void {
-    const evidence = getCurlHeadersEvidence();
+    const evidence =
+      this.lastHttpxProbeEvidence.trim() ||
+      "(No httpx-probe output captured yet — run “check the web app” first.)";
     const payload: ReportCardPayload = {
-      finding: "Outdated server header disclosure",
+      finding: "Server Technology Disclosure",
       severity: "Medium",
       cvss: "5.3",
+      description:
+        "The target is exposing server version information via response headers, allowing attackers to fingerprint the stack",
       evidence,
       remediation:
-        "Remove or obscure the Server response header in your web server configuration",
+        "Remove the Server and X-Powered-By headers in your web server config",
       mitre: "T1592 — Gather Victim Host Information",
     };
     if (this.bus.reportCard) this.bus.reportCard(payload);
@@ -277,6 +284,8 @@ export class ChatRouter {
       this.bus.reply(
         [
           `### ${payload.finding}`,
+          "",
+          payload.description ?? "",
           "",
           `**Severity:** ${payload.severity} · **CVSS:** ${payload.cvss}`,
           "",
@@ -307,6 +316,9 @@ export class ChatRouter {
         return;
       case "tools":
         this.cmdListTools();
+        return;
+      case "styled_report":
+        this.emitReportCard();
         return;
       case "run":
         await this.cmdRun(cmd.toolId, cmd.target, cmd.args ?? {});
@@ -571,12 +583,12 @@ export class ChatRouter {
       const ts = new Date().toISOString();
       this.bus.reply(
         [
-          "### Session created",
+          `✓ Session created: ${session.name}`,
           "",
-          `- **Name:** \`${session.name}\``,
-          `- **ID:** \`${session.id}\``,
-          `- **Timestamp (UTC):** ${ts}`,
-          `- **Phase:** recon`,
+          `**UUID:** \`${session.id}\``,
+          `**Timestamp:** ${ts}`,
+          "",
+          "Phase: Recon",
         ].join("\n"),
         "success",
       );
@@ -666,6 +678,9 @@ export class ChatRouter {
     if (tool.id === "curl-headers") {
       clearProbeEvidence();
     }
+    if (tool.id === "httpx-probe") {
+      this.lastHttpxProbeEvidence = "";
+    }
 
     const args = coerceArgs(tool, rawArgs);
     if (args.error) {
@@ -704,6 +719,9 @@ export class ChatRouter {
           const stream = c.type === "stderr" ? "stderr" : "stdout";
           if (tool.id === "curl-headers" && stream === "stdout") {
             appendCurlHeadersChunk(c.data);
+          }
+          if (tool.id === "httpx-probe" && stream === "stdout") {
+            this.lastHttpxProbeEvidence += c.data;
           }
           this.bus.streamChunk(run.id, c.data, stream);
         },

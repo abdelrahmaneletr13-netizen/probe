@@ -14,7 +14,8 @@ export type Command =
   | { tag: "connect_urls"; url: string; apiKey?: string }
   | { tag: "create_session"; sessionName?: string }
   | { tag: "tools" }
-  | { tag: "run"; toolId: string; target: string; args?: Record<string, string> };
+  | { tag: "run"; toolId: string; target: string; args?: Record<string, string> }
+  | { tag: "styled_report" };
 
 export type DemoResponse =
   | {
@@ -31,6 +32,7 @@ export type DemoResponse =
   | { variant: "native_run"; toolId: string; target: string }
   | { variant: "styled_report_placeholder" };
 
+/** Judge demo: exact normalized lines only (see handleDemoScript in router). */
 export const DEMO_SCRIPT: ReadonlyArray<{
   readonly trigger: string;
   readonly response: DemoResponse;
@@ -39,12 +41,7 @@ export const DEMO_SCRIPT: ReadonlyArray<{
     trigger: "connect http://localhost:8787 dev-key",
     response: {
       variant: "bubbles_then_connect",
-      ux: [
-        "### ✅ PenTest IDE — secure channel established",
-        "> **Reachability**: control plane acknowledged at `localhost:8787`.",
-        "- 🔐 **Bearer credential**: provisioned for this workstation.",
-        "- 🎯 **Target locked**: `localhost:8787`\n\n**Scope validated ✓**\n_Operational phase: ACTIVE._",
-      ],
+      ux: ["✓ Connected to http://localhost:8787", "Scope validated ✓"],
       backendUrl: "http://localhost:8787",
       backendKey: "dev-key",
     },
@@ -53,23 +50,9 @@ export const DEMO_SCRIPT: ReadonlyArray<{
     trigger: "create session acme-engagement",
     response: {
       variant: "bubbles_then_create_session",
-      uxBefore: [
-        "**Engagement shell** deploying — provisioning workspace `acme-engagement` on the recon plane.",
-      ],
+      uxBefore: [],
       name: "acme-engagement",
     },
-  },
-  {
-    trigger: "run nmap-quick 127.0.0.1",
-    response: { variant: "native_run", toolId: "nmap-quick", target: "127.0.0.1" },
-  },
-  {
-    trigger: "whatweb http://localhost:8787",
-    response: { variant: "native_run", toolId: "whatweb", target: "http://localhost:8787" },
-  },
-  {
-    trigger: "nikto http://localhost:8787",
-    response: { variant: "native_run", toolId: "nikto", target: "http://localhost:8787" },
   },
   { trigger: "report", response: { variant: "styled_report_placeholder" } },
 ];
@@ -103,13 +86,46 @@ function httpize(hostOrUrl: string): string {
   return `http://${hostOrUrl}`;
 }
 
-/**
- * Keyword-only resolver. Returns `null` only when the caller should treat the
- * line as already handled elsewhere (unused today — always returns a Command).
- */
+function wantsWebProbe(input: string): boolean {
+  if (/\bnmap\b/i.test(input)) return false;
+  return (
+    /\bweb\b/i.test(input) ||
+    /\bwebsite\b/i.test(input) ||
+    /\bwebapp\b/i.test(input) ||
+    /\bhttps?\b/i.test(input) ||
+    /\bapplication\b/i.test(input) ||
+    /\bapp\b/i.test(input)
+  );
+}
 
-export function resolveIntent(input: string): Command | null {
+function wantsWhatweb(input: string): boolean {
+  return (
+    /\b(technologies?|tech\s*stack|stack|whatweb|framework|cms)\b/i.test(
+      input,
+    ) ||
+    /\bwhat\s+technologies\b/i.test(input) ||
+    (/\brunning\b/i.test(input) &&
+      /\b(technologies?|technology|tech|stack)\b/i.test(input))
+  );
+}
+
+/** Keyword-only resolver (always returns a concrete command or guidance message). */
+
+export function resolveIntent(input: string): Command {
   const key = normalizeProbeInput(input);
+
+  if (/\b(report|findings|summary)\b/i.test(input)) {
+    return { tag: "styled_report" };
+  }
+
+  if (
+    /\b(?:help|\?|commands|tool\s*catalog|cheat\s*sheet|capabilities|what\s+can\s+you)\b/i.test(
+      input,
+    ) ||
+    /\btools\b/i.test(input)
+  ) {
+    return { tag: "tools" };
+  }
 
   const connectVerb =
     /\b(?:connect(?:\s+to)?|set\s+target|target\s+is|attacking|authenticate|engage)\b/i.test(
@@ -118,7 +134,9 @@ export function resolveIntent(input: string): Command | null {
 
   const urlHit = sniffUrl(input);
   if (connectVerb && urlHit) {
-    const tail = input.slice(input.toLowerCase().indexOf(urlHit.toLowerCase()) + urlHit.length).trim();
+    const tail = input
+      .slice(input.toLowerCase().indexOf(urlHit.toLowerCase()) + urlHit.length)
+      .trim();
     const parts = tail.split(/\s+/).filter(Boolean);
     const skip = new Set(["with", "key", "using", "token", "bearer", "and"]);
     const tokenish = parts.find((p) => p.length >= 3 && !skip.has(p.toLowerCase()));
@@ -159,14 +177,6 @@ export function resolveIntent(input: string): Command | null {
   }
 
   if (
-    /\b(?:help|\?|commands|what\s+can\s+you|capabilities|tool\s*catalog|cheat\s*sheet)\b/i.test(
-      input,
-    )
-  ) {
-    return { tag: "tools" };
-  }
-
-  if (
     /\b(?:full|deep|thorough|comprehensive)\s+(?:port\s*)?scan\b/i.test(input) ||
     /\ball\s+ports\b/i.test(key)
   ) {
@@ -174,12 +184,19 @@ export function resolveIntent(input: string): Command | null {
   }
 
   if (
-    /\b(?:technology|tech\s*stack|what\s+is\s+running|framework|cms|finger\s*print)\b/i.test(
+    /\b(?:scan|scans|scanning|ports?|port\s*scan|recon(?:naissance)?)\b/i.test(
       input,
-    ) ||
-    /\bwhat\s*web\b/i.test(key)
+    )
   ) {
-    return { tag: "run", toolId: "whatweb", target: httpize(pickTarget(input)) };
+    return { tag: "run", toolId: "nmap-quick", target: "127.0.0.1" };
+  }
+
+  if (wantsWhatweb(input)) {
+    return {
+      tag: "run",
+      toolId: "whatweb",
+      target: "http://localhost:8787",
+    };
   }
 
   if (
@@ -195,24 +212,17 @@ export function resolveIntent(input: string): Command | null {
     return { tag: "run", toolId: "curl-headers", target: httpize(pickTarget(input)) };
   }
 
-  if (
-    /\b(?:web|website|webapp|https?|application)\b/i.test(input) &&
-    !/\bnmap\b/i.test(input)
-  ) {
-    return { tag: "run", toolId: "httpx-probe", target: httpize(pickTarget(input)) };
-  }
-
-  if (
-    /\b(?:scan|nmap|ports?|open\s+ports?|enumerate|enumeration|recon(?:naissance)?|vulnerabilit)\b/i.test(
-      input,
-    )
-  ) {
-    return { tag: "run", toolId: "nmap-quick", target: pickTarget(input) };
+  if (wantsWebProbe(input)) {
+    return {
+      tag: "run",
+      toolId: "httpx-probe",
+      target: "http://localhost:8787",
+    };
   }
 
   return {
     tag: "message",
     markdown:
-      "Try describing what you want to test — e.g. 'scan for open ports' or 'check the web app'.",
+      "Try: 'scan for open ports' or 'check the web app'",
   };
 }
