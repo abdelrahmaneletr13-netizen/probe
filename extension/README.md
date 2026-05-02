@@ -14,6 +14,31 @@ sessions, run tools, and watch output stream live — all from one text window.
 Live run output streams into the same chat window. Type `help` for the full
 list of commands.
 
+### LLM (Cursor-style natural language)
+
+Fuzzy chat (“nmap my wifi for vulns…”) is handled by an **optional planner** that
+calls any **OpenAI-compatible** `POST /v1/chat/completions` (OpenAI, Groq,
+Together, Azure OpenAI gateway, OpenRouter, local proxies, …).
+
+1. `⌘⇧P` → **Pentest IDE: Configure LLM** → enable and paste provider key / URL / model.
+2. Planner receives your message plus the live **tools** and **sessions** list and returns structured JSON mapped to Pentest IDE actions (`run`, `create_session`, etc.).
+
+Secrets: **`pentestIde.llmApiKey`** is sent **only** to your LLM host — not to the pentest backend. Turn off **`pentestIde.llmResponseJsonMode`** if your server rejects JSON-mode (some Ollama setups).
+
+### Chat is inside Cursor / VS Code (not Chrome)
+
+The chat panel uses a **VS Code Webview**: HTML runs **inside an editor tab**,
+not in an external browser. That is how custom UIs work in VS Code extensions;
+there is no separate “pure native” chat widget exposed to extensions.
+
+After you reinstall a VSIX or change extension code locally:
+
+1. **`⌘⇧P`** → **Developer: Reload Window** (Cursor and VS Code both have this).
+
+Or, when developing:
+
+2. **`F5`** on the extension project again (Extension Development Host restarts).
+
 ### Chat commands
 
 | Intent | Examples |

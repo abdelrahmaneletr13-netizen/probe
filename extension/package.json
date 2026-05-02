@@ -30,6 +30,7 @@
     },
     "commands": [
       { "command": "pentestIde.openChat", "title": "Pentest IDE: Open chat", "icon": "$(comment-discussion)" },
+      { "command": "pentestIde.configureLlm", "title": "Pentest IDE: Configure LLM (chat planner)" },
       { "command": "pentestIde.signIn", "title": "Pentest IDE: Connect to backend" },
       { "command": "pentestIde.createSession", "title": "Pentest IDE: New session" },
       { "command": "pentestIde.deleteSession", "title": "Pentest IDE: Delete session" },
@@ -39,7 +40,8 @@
       { "command": "pentestIde.openRunOutput", "title": "Pentest IDE: Open run output" },
       { "command": "pentestIde.openFindings", "title": "Pentest IDE: Open findings" },
       { "command": "pentestIde.addFinding", "title": "Pentest IDE: Add finding from run" },
-      { "command": "pentestIde.exportFindings", "title": "Pentest IDE: Export findings (Markdown)" }
+      { "command": "pentestIde.exportFindings", "title": "Pentest IDE: Export findings (Markdown)" },
+      { "command": "pentestIde.resetDemo", "title": "Pentest IDE: Reset demo (hackathon)" }
     ],
     "menus": {
       "view/title": [
@@ -73,6 +75,44 @@
           "type": "number",
           "default": 15000,
           "description": "HTTP request timeout in milliseconds."
+        },
+        "pentestIde.llmEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable an LLM to interpret fuzzy chat messages (OpenAI-compatible /v1/chat/completions)."
+        },
+        "pentestIde.llmApiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key sent only to your LLM provider (not to the Pentest IDE backend).\nSee **Pentest IDE: Configure LLM**.",
+          "scope": "machine"
+        },
+        "pentestIde.llmApiBaseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "Base URL for chat completions (/v1 is appended automatically if missing)."
+        },
+        "pentestIde.llmModel": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Model identifier passed to chat/completions."
+        },
+        "pentestIde.llmTemperature": {
+          "type": "number",
+          "default": 0.3,
+          "minimum": 0,
+          "maximum": 2
+        },
+        "pentestIde.llmTimeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 5000,
+          "description": "Planner request timeout."
+        },
+        "pentestIde.llmResponseJsonMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Sets response_format=json_object when supported (OpenAI, Groq, …). Turn off for Ollama/other APIs that reject it."
         }
       }
     }

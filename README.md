@@ -2,7 +2,7 @@
 
 A small **plug-and-play** workbench for security testing from inside your editor.
 
-> 🚀 **Live demo**: https://pentest-ide-backend.onrender.com — open in any browser, no install needed.
+> **Hosted API** (for the extension): https://pentest-ide-backend.onrender.com — there is no built-in browser console; use the **VS Code / Cursor extension** (or `curl` against `/v1/*` with a bearer key).
 
 ```
 ┌─────────────────────────┐         HTTPS + SSE          ┌────────────────────────────┐

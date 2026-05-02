@@ -120,4 +120,9 @@ describe("parseIntent", () => {
   it("returns unknown for gibberish", () => {
     expect(parseIntent("xyzzy plover")).toEqual({ kind: "unknown" });
   });
+
+  it("parses reset demo", () => {
+    expect(parseIntent("reset demo")).toEqual({ kind: "resetDemo" });
+    expect(parseIntent("Reset Demo")).toEqual({ kind: "resetDemo" });
+  });
 });

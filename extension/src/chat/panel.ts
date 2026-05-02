@@ -4,6 +4,7 @@ import {
   type ChatBus,
   type ChatState,
   type ReplyKind,
+  type ReportCardPayload,
   type RouterDeps,
 } from "./router.js";
 
@@ -15,7 +16,13 @@ type ServerMessage =
       id: string;
       ts: string;
     }
-  | { type: "streamStart"; runId: string; header: string; ts: string }
+  | {
+      type: "streamStart";
+      runId: string;
+      header: string;
+      ts: string;
+      runningLabel?: string;
+    }
   | {
       type: "streamChunk";
       runId: string;
@@ -24,7 +31,8 @@ type ServerMessage =
     }
   | { type: "streamEnd"; runId: string; footer: string; ok: boolean }
   | { type: "state"; state: ChatState }
-  | { type: "clear" };
+  | { type: "clear" }
+  | { type: "reportCard"; payload: ReportCardPayload };
 
 type ClientMessage =
   | { type: "ready" }
@@ -43,6 +51,13 @@ export class ChatPanel implements ChatBus {
   private static instance?: ChatPanel;
   private panel: vscode.WebviewPanel;
   private router: ChatRouter;
+  private streamTail = new Map<string, string>();
+  private streamQueues = new Map<string, Promise<void>>();
+
+  /** After palette `pentestIde.resetDemo` clears credentials, sync open chat UI. */
+  static touchPaletteDemoReset(): void {
+    ChatPanel.instance?.syncAfterPaletteDemoReset();
+  }
 
   static open(deps: RouterDeps): ChatPanel {
     if (ChatPanel.instance) {
@@ -118,12 +133,15 @@ export class ChatPanel implements ChatBus {
     });
   }
 
-  streamStart(runId: string, header: string): void {
+  streamStart(runId: string, header: string, runningLabel?: string): void {
+    this.streamTail.delete(runId);
+    this.streamQueues.delete(runId);
     this.postMessageToWebview({
       type: "streamStart",
       runId,
       header,
       ts: new Date().toISOString(),
+      runningLabel,
     });
   }
 
@@ -132,23 +150,70 @@ export class ChatPanel implements ChatBus {
     data: string,
     stream: "stdout" | "stderr",
   ): void {
-    this.postMessageToWebview({
-      type: "streamChunk",
-      runId,
-      data,
-      stream,
-    });
+    const prev = this.streamTail.get(runId) ?? "";
+    let buf = prev + data;
+    const parts = buf.split("\n");
+    const rest = parts.pop() ?? "";
+    this.streamTail.set(runId, rest);
+    for (const line of parts) {
+      this.enqueueStreamLine(runId, stream, `${line}\n`);
+    }
   }
 
   streamEnd(runId: string, footer: string, ok: boolean): void {
-    this.postMessageToWebview({ type: "streamEnd", runId, footer, ok });
+    const tail = this.streamTail.get(runId) ?? "";
+    this.streamTail.delete(runId);
+    if (tail) {
+      this.enqueueStreamLine(runId, "stdout", tail);
+    }
+    const chain = this.streamQueues.get(runId) ?? Promise.resolve();
+    const done = chain.then(() => {
+      this.streamQueues.delete(runId);
+      this.postMessageToWebview({ type: "streamEnd", runId, footer, ok });
+    });
+    this.streamQueues.set(runId, done);
   }
 
   setState(state: ChatState): void {
     this.postMessageToWebview({ type: "state", state });
   }
 
+  reportCard(payload: ReportCardPayload): void {
+    this.postMessageToWebview({ type: "reportCard", payload });
+  }
+
+  resetDemoUi(): void {
+    this.streamTail.clear();
+    this.streamQueues.clear();
+    this.postMessageToWebview({ type: "clear" });
+    this.greet();
+  }
+
+  syncAfterPaletteDemoReset(): void {
+    this.router.clearActiveSessionAndPublish();
+    this.resetDemoUi();
+  }
+
   // ---------- internals ----------
+
+  private enqueueStreamLine(
+    runId: string,
+    stream: "stdout" | "stderr",
+    text: string,
+  ): void {
+    const prev = this.streamQueues.get(runId) ?? Promise.resolve();
+    const next = prev
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, 30);
+          }),
+      )
+      .then(() => {
+        this.postMessageToWebview({ type: "streamChunk", runId, data: text, stream });
+      });
+    this.streamQueues.set(runId, next);
+  }
 
   private postMessageToWebview(msg: ServerMessage) {
     this.panel.webview.postMessage(msg).then(undefined, () => {
@@ -244,6 +309,18 @@ function buildHtml(): string {
   }
   header .dot.ok { background: #2ea043; }
   header .dot.warn { background: #d29922; }
+  .conn-badge {
+    color: #2ea043;
+    font-size: 11px;
+    font-weight: 500;
+    display: none;
+  }
+  .conn-badge.show { display: inline; }
+  .session-badge {
+    color: #58a6ff;
+    font-size: 11px;
+    font-weight: 500;
+  }
   header .meta {
     color: var(--muted);
     font-size: 11px;
@@ -419,6 +496,65 @@ function buildHtml(): string {
     word-break: break-all;
   }
   .run pre.body .err { color: #f85149; }
+  .run pre.body .port { color: #d29922; font-weight: 600; }
+  .run-spin-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+  }
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--muted);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: pspin 0.75s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes pspin { to { transform: rotate(360deg); } }
+
+  .finding-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--bubble-assistant);
+    max-width: 95%;
+    line-height: 1.5;
+  }
+  .finding-card h3 { margin: 0 0 8px 0; font-size: 14px; }
+  .finding-card .meta-row { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .finding-card pre.evidence {
+    margin: 0 0 10px 0;
+    padding: 8px 10px;
+    background: var(--code-bg);
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow: auto;
+  }
+  .sev-pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 8px;
+  }
+  .sev-pill.critical { background: rgba(248,81,73,0.25); color: #ff7b72; }
+  .sev-pill.high { background: rgba(248,81,73,0.18); color: #f85149; }
+  .sev-pill.medium { background: rgba(210,153,34,0.22); color: #d29922; }
+  .sev-pill.low { background: rgba(46,160,67,0.18); color: #3fb950; }
+  .bubble .sev-crit { color: #ff7b72; font-weight: 700; }
+  .bubble .sev-high { color: #f85149; font-weight: 600; }
+  .bubble .sev-med { color: #d29922; font-weight: 600; }
+  .bubble .sev-low { color: #3fb950; font-weight: 600; }
 
   footer {
     flex: 0 0 auto;
@@ -475,6 +611,7 @@ function buildHtml(): string {
       <span>Pentest IDE</span>
     </div>
     <div class="meta" id="meta">
+      <span id="connBadge" class="conn-badge">● Connected</span>
       <span id="metaUrl">not connected</span>
       <span id="metaSession"></span>
       <span id="metaCounts"></span>
@@ -516,12 +653,13 @@ function buildHtml(): string {
   const sendBtn = document.getElementById('send');
   const clearBtn = document.getElementById('clearBtn');
   const dot = document.getElementById('dot');
+  const connBadge = document.getElementById('connBadge');
   const metaUrl = document.getElementById('metaUrl');
   const metaSession = document.getElementById('metaSession');
   const metaCounts = document.getElementById('metaCounts');
   const chips = document.getElementById('chips');
 
-  const runEls = new Map();   // runId -> { wrap, body }
+  const runEls = new Map();   // runId -> { wrap, body, spinRow }
   const history = [];
   let historyIdx = -1;
 
@@ -575,12 +713,19 @@ function buildHtml(): string {
     if (inOlist) out.push('</ol>');
     return out.join('');
   }
+  function paintSeverityTokens(html) {
+    return String(html)
+      .replace(/\bCritical\b/g, '<span class="sev-crit">Critical</span>')
+      .replace(/\bHigh\b/g, '<span class="sev-high">High</span>')
+      .replace(/\bMedium\b/g, '<span class="sev-med">Medium</span>')
+      .replace(/\bLow\b/g, '<span class="sev-low">Low</span>');
+  }
   function inlineMd(s) {
     let t = escapeHtml(s);
     t = t.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
     t = t.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
     t = t.replace(/(?:^|\\s)_([^_]+)_/g, (m, p1) => m.replace('_' + p1 + '_', '<em>' + p1 + '</em>'));
-    return t;
+    return paintSeverityTokens(t);
   }
 
   function appendBubble(kind, text) {
@@ -607,7 +752,17 @@ function buildHtml(): string {
     log.scrollTop = log.scrollHeight;
   }
 
-  function appendRun(runId, header) {
+  function decorateRunChunk(plain, stream) {
+    let t = escapeHtml(plain);
+    if (stream !== 'stderr') {
+      t = t.replace(/\b(\d{1,5})\/(tcp|udp)\b/gi, '<span class="port">$1/$2</span>');
+      t = t.replace(/:(\d{2,5})\b/g, ':<span class="port">$1</span>');
+      t = paintSeverityTokens(t);
+    }
+    return t;
+  }
+
+  function appendRun(runId, header, runningLabel) {
     const row = document.createElement('div');
     row.className = 'row';
     const av = document.createElement('div');
@@ -619,26 +774,64 @@ function buildHtml(): string {
     const head = document.createElement('div');
     head.className = 'run-head';
     head.textContent = header;
+    wrap.appendChild(head);
+    let spinRow = null;
+    if (runningLabel) {
+      spinRow = document.createElement('div');
+      spinRow.className = 'run-spin-row';
+      spinRow.innerHTML = '<span class="spinner"></span><span>' + escapeHtml(runningLabel) + '</span>';
+      wrap.appendChild(spinRow);
+    }
     const body = document.createElement('pre');
     body.className = 'body';
-    wrap.appendChild(head);
     wrap.appendChild(body);
     row.appendChild(wrap);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
-    runEls.set(runId, { wrap, body });
+    runEls.set(runId, { wrap, body, spinRow });
   }
 
   function appendChunk(runId, data, stream) {
     const ent = runEls.get(runId);
     if (!ent) return;
-    const span = document.createElement('span');
-    if (stream === 'stderr') span.className = 'err';
-    span.textContent = data;
-    ent.body.appendChild(span);
+    if (ent.spinRow) {
+      ent.spinRow.remove();
+      ent.spinRow = null;
+    }
+    const wrap = document.createElement('span');
+    if (stream === 'stderr') wrap.className = 'err';
+    wrap.innerHTML = decorateRunChunk(data, stream);
+    ent.body.appendChild(wrap);
     const nearBottom =
       log.scrollHeight - log.scrollTop - log.clientHeight < 80;
     if (nearBottom) log.scrollTop = log.scrollHeight;
+  }
+
+  function appendReportCard(p) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.textContent = '📋';
+    row.appendChild(av);
+    const sev = (p.severity || '').toLowerCase();
+    let pillClass = 'medium';
+    if (sev === 'critical') pillClass = 'critical';
+    else if (sev === 'high') pillClass = 'high';
+    else if (sev === 'low') pillClass = 'low';
+    const card = document.createElement('div');
+    card.className = 'finding-card';
+    card.innerHTML =
+      '<h3>' + escapeHtml(p.finding) + '</h3>' +
+      '<div class="meta-row"><span class="sev-pill ' + pillClass + '">' + escapeHtml(p.severity) + '</span>' +
+      '<span>CVSS ' + escapeHtml(p.cvss) + '</span></div>' +
+      '<div style="font-size:11px;color:var(--muted);margin:0 0 4px 0">Evidence</div>' +
+      '<pre class="evidence">' + escapeHtml(p.evidence) + '</pre>' +
+      '<div style="font-size:12px;margin-bottom:6px"><strong>Remediation</strong><br/>' + escapeHtml(p.remediation) + '</div>' +
+      '<div style="font-size:11px;color:var(--muted)"><strong>MITRE</strong> · ' + escapeHtml(p.mitre) + '</div>';
+    row.appendChild(card);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
   }
 
   function appendFooter(runId, footer, ok) {
@@ -653,11 +846,17 @@ function buildHtml(): string {
   function setState(state) {
     const connected = !!state.connected;
     dot.className = 'dot ' + (connected ? 'ok' : (state.baseUrl ? 'warn' : ''));
+    if (connBadge) {
+      connBadge.className = 'conn-badge' + (connected ? ' show' : '');
+    }
+    const targetHint = state.probeTarget ? ' · scope: ' + state.probeTarget : '';
     metaUrl.textContent = state.baseUrl
-      ? (connected ? state.baseUrl : state.baseUrl + ' (no key)')
+      ? (connected ? state.baseUrl + targetHint : state.baseUrl + ' (no key)')
       : 'not connected';
-    metaSession.textContent = state.activeSessionName
-      ? '· session: ' + state.activeSessionName
+    const sess = state.activeSessionName || '';
+    const sessActive = state.sessionActive && sess;
+    metaSession.textContent = sess
+      ? (sessActive ? '● Session Active · ' + sess : 'session: ' + sess)
       : '';
     metaCounts.textContent =
       '· ' + (state.sessionCount || 0) + ' sessions / ' + (state.toolCount || 0) + ' tools';
@@ -712,13 +911,15 @@ function buildHtml(): string {
     if (msg.type === 'message') {
       appendBubble(msg.kind, msg.text);
     } else if (msg.type === 'streamStart') {
-      appendRun(msg.runId, msg.header);
+      appendRun(msg.runId, msg.header, msg.runningLabel);
     } else if (msg.type === 'streamChunk') {
       appendChunk(msg.runId, msg.data, msg.stream);
     } else if (msg.type === 'streamEnd') {
       appendFooter(msg.runId, msg.footer, msg.ok);
     } else if (msg.type === 'state') {
       setState(msg.state);
+    } else if (msg.type === 'reportCard') {
+      appendReportCard(msg.payload);
     } else if (msg.type === 'clear') {
       log.innerHTML = '';
       runEls.clear();

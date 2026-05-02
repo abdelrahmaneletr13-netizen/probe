@@ -10,7 +10,7 @@ declare module "fastify" {
 export function registerAuth(app: FastifyInstance, config: AppConfig) {
   app.decorateRequest("apiKey", "");
 
-  const PUBLIC_GETS = new Set(["/healthz", "/", "/ui"]);
+  const PUBLIC_GETS = new Set(["/healthz", "/"]);
 
   app.addHook("onRequest", async (req, reply) => {
     if (req.method === "GET" && PUBLIC_GETS.has(req.url)) return;

@@ -8,6 +8,8 @@ import type { OutputManager } from "./output.js";
 import type { FindingsStore } from "./findings/store.js";
 import { FindingsPanel } from "./findings/panel.js";
 import type { Severity } from "./findings/types.js";
+import { clearDemoBackendState } from "./chat/demoReset.js";
+import { ChatPanel } from "./chat/panel.js";
 
 export function registerCommands(
   context: vscode.ExtensionContext,
@@ -27,6 +29,11 @@ export function registerCommands(
         }
       }),
     );
+
+  reg("pentestIde.resetDemo", async () => {
+    await clearDemoBackendState({ refreshConfig, manager });
+    ChatPanel.touchPaletteDemoReset();
+  });
 
   reg("pentestIde.signIn", async () => {
     const url = await vscode.window.showInputBox({
@@ -54,6 +61,67 @@ export function registerCommands(
     await refreshConfig();
     await manager.refresh();
     vscode.window.showInformationMessage("Connected to Pentest IDE backend.");
+  });
+
+  reg("pentestIde.configureLlm", async () => {
+    const pick = await vscode.window.showQuickPick(
+      [{ label: "Enable + set LLM API key…" }, { label: "Disable LLM planner" }],
+      {
+        title: "Pentest IDE chat — LLM",
+        placeHolder: "Uses OpenAI-compatible POST …/v1/chat/completions",
+      },
+    );
+    if (!pick) return;
+    const workspaceCfg = vscode.workspace.getConfiguration("pentestIde");
+
+    if (pick.label.startsWith("Disable")) {
+      await workspaceCfg.update("llmEnabled", false, vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage(
+        "Pentest IDE: LLM disabled. Chat falls back to command patterns.",
+      );
+      return;
+    }
+
+    const llmKey = await vscode.window.showInputBox({
+      prompt: "LLM API key (sent only to the LLM provider, not Pentest IDE backend)",
+      password: true,
+      ignoreFocusOut: true,
+      value: workspaceCfg.get<string>("llmApiKey") ?? "",
+    });
+    if (!llmKey?.trim()) {
+      vscode.window.showWarningMessage("No key — unchanged.");
+      return;
+    }
+
+    const baseRaw = await vscode.window.showInputBox({
+      prompt: "Chat completions API base URL",
+      ignoreFocusOut: true,
+      value: workspaceCfg.get<string>("llmApiBaseUrl") ?? "https://api.openai.com/v1",
+    });
+    const modelPick = await vscode.window.showInputBox({
+      prompt: "Model ID",
+      ignoreFocusOut: true,
+      value: workspaceCfg.get<string>("llmModel") ?? "gpt-4o-mini",
+    });
+    await workspaceCfg.update("llmApiKey", llmKey.trim(), vscode.ConfigurationTarget.Global);
+    await workspaceCfg.update("llmEnabled", true, vscode.ConfigurationTarget.Global);
+    if (baseRaw?.trim()) {
+      await workspaceCfg.update(
+        "llmApiBaseUrl",
+        baseRaw.trim(),
+        vscode.ConfigurationTarget.Global,
+      );
+    }
+    if (modelPick?.trim()) {
+      await workspaceCfg.update(
+        "llmModel",
+        modelPick.trim(),
+        vscode.ConfigurationTarget.Global,
+      );
+    }
+    vscode.window.showInformationMessage(
+      "Pentest IDE: LLM chat planner enabled.",
+    );
   });
 
   reg("pentestIde.refresh", async () => {

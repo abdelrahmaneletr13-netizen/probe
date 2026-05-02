@@ -6,18 +6,47 @@ import type { OutputManager } from "../output.js";
 import type { FindingsStore } from "../findings/store.js";
 import { FindingsPanel } from "../findings/panel.js";
 import type { Severity } from "../findings/types.js";
+import { classifyConversational, type ConversationalTurn } from "./naturalLanguage.js";
+import type { Intent } from "./types.js";
+import { clearDemoBackendState } from "./demoReset.js";
+import {
+  type Command,
+  type DemoResponse,
+  normalizeProbeInput,
+  probeDemoLookup,
+  resolveIntent,
+} from "./probeIntent.js";
+import {
+  appendCurlHeadersChunk,
+  clearProbeEvidence,
+  getCurlHeadersEvidence,
+} from "./probeEvidence.js";
+import { probeSetCanonicalTarget, probeCurrentTarget } from "./probeState.js";
+
+export type { Intent } from "./types.js";
 
 /**
  * Bus that the router uses to talk back to the chat webview. Implementations
  * forward to `webview.postMessage`. Kept abstract so the router can be unit
  * tested without a real panel.
  */
+export interface ReportCardPayload {
+  finding: string;
+  severity: string;
+  cvss: string;
+  evidence: string;
+  remediation: string;
+  mitre: string;
+}
+
 export interface ChatBus {
   reply(text: string, kind?: ReplyKind): void;
-  streamStart(runId: string, header: string): void;
+  streamStart(runId: string, header: string, runningLabel?: string): void;
   streamChunk(runId: string, data: string, stream: "stdout" | "stderr"): void;
   streamEnd(runId: string, footer: string, ok: boolean): void;
   setState(state: ChatState): void;
+  reportCard?(payload: ReportCardPayload): void;
+  resetDemoUi?(): void;
 }
 
 export type ReplyKind =
@@ -33,8 +62,11 @@ export interface ChatState {
   baseUrl: string;
   activeSessionId?: string;
   activeSessionName?: string;
+  sessionActive: boolean;
   sessionCount: number;
   toolCount: number;
+  /** Canonical demo / probe target host shown in the header. */
+  probeTarget: string;
 }
 
 export interface RouterDeps {
@@ -61,6 +93,18 @@ export class ChatRouter {
     deps.manager.onDidChange(() => this.publishState());
   }
 
+  /** Clears credentials + probe artifacts and drops the active session pointer. */
+  async performFullDemoReset(): Promise<void> {
+    await clearDemoBackendState(this.deps);
+    this.activeSessionId = undefined;
+    this.publishState();
+  }
+
+  clearActiveSessionAndPublish(): void {
+    this.activeSessionId = undefined;
+    this.publishState();
+  }
+
   publishState(): void {
     const sessions = this.deps.manager.getSessions();
     const tools = this.deps.manager.getTools();
@@ -76,8 +120,10 @@ export class ChatRouter {
       baseUrl: this.deps.client.baseUrl,
       activeSessionId: active?.id,
       activeSessionName: active?.name,
+      sessionActive: Boolean(active?.id),
       sessionCount: sessions.length,
       toolCount: tools.length,
+      probeTarget: probeCurrentTarget(),
     });
   }
 
@@ -87,65 +133,265 @@ export class ChatRouter {
     if (!text) return;
 
     try {
-      const intent = parseIntent(text);
-      switch (intent.kind) {
-        case "help":
-          this.replyHelp();
-          return;
-        case "status":
-          await this.cmdStatus();
-          return;
-        case "connect":
-          await this.cmdConnect(intent.url, intent.apiKey);
-          return;
-        case "disconnect":
-          await this.cmdDisconnect();
-          return;
-        case "refresh":
-          await this.cmdRefresh();
-          return;
-        case "listSessions":
-          this.cmdListSessions();
-          return;
-        case "listTools":
-          this.cmdListTools();
-          return;
-        case "listRuns":
-          this.cmdListRuns();
-          return;
-        case "createSession":
-          await this.cmdCreateSession(intent.name, intent.scope);
-          return;
-        case "deleteSession":
-          await this.cmdDeleteSession(intent.target);
-          return;
-        case "useSession":
-          this.cmdUseSession(intent.target);
-          return;
-        case "run":
-          await this.cmdRun(intent.tool, intent.target, intent.args);
-          return;
-        case "openOutput":
-          this.cmdOpenOutput(intent.index);
-          return;
-        case "cancel":
-          await this.cmdCancel(intent.index);
-          return;
-        case "findings":
-          this.cmdFindings();
-          return;
-        case "addFinding":
-          await this.cmdAddFinding(intent.title, intent.severity, intent.notes);
-          return;
-        case "unknown":
-          this.bus.reply(
-            `I didn't recognize \`${text}\`. Type \`help\` to see what I understand.`,
-            "info",
-          );
-          return;
+      const scripted = probeDemoLookup(normalizeProbeInput(text));
+      if (scripted) {
+        await this.handleDemoScript(scripted);
+        return;
       }
+
+      const intent = parseIntent(text);
+      if (intent.kind !== "unknown") {
+        await this.executeIntent(intent);
+        return;
+      }
+
+      await this.handleUnknownTurn(text);
     } catch (err) {
       this.bus.reply(formatError(err), "error");
+    }
+  }
+
+  private async executeIntent(
+    intent: Exclude<Intent, { kind: "unknown" }>,
+  ): Promise<void> {
+    switch (intent.kind) {
+      case "help":
+        this.replyHelp();
+        return;
+      case "status":
+        await this.cmdStatus();
+        return;
+      case "connect":
+        await this.cmdConnect(intent.url, intent.apiKey);
+        return;
+      case "disconnect":
+        await this.cmdDisconnect();
+        return;
+      case "refresh":
+        await this.cmdRefresh();
+        return;
+      case "listSessions":
+        this.cmdListSessions();
+        return;
+      case "listTools":
+        this.cmdListTools();
+        return;
+      case "listRuns":
+        this.cmdListRuns();
+        return;
+      case "createSession":
+        await this.cmdCreateSession(intent.name, intent.scope);
+        return;
+      case "deleteSession":
+        await this.cmdDeleteSession(intent.target);
+        return;
+      case "useSession":
+        this.cmdUseSession(intent.target);
+        return;
+      case "run":
+        await this.cmdRun(intent.tool, intent.target, intent.args);
+        return;
+      case "openOutput":
+        this.cmdOpenOutput(intent.index);
+        return;
+      case "cancel":
+        await this.cmdCancel(intent.index);
+        return;
+      case "findings":
+        this.cmdFindings();
+        return;
+      case "addFinding":
+        await this.cmdAddFinding(intent.title, intent.severity, intent.notes);
+        return;
+      case "resetDemo":
+        await this.performFullDemoReset();
+        this.bus.resetDemoUi?.();
+        this.bus.reply("Demo reset — workspace cleared. Welcome back.", "success");
+        return;
+    }
+  }
+
+  /** Conversational niceties → keyword intent (fully offline). */
+  private async handleUnknownTurn(text: string): Promise<void> {
+    const relaxed = classifyConversational(text, this.deps.manager.getTools());
+    if (relaxed) {
+      await this.handleConversational(relaxed);
+      return;
+    }
+
+    const cmd = resolveIntent(text);
+    await this.dispatchProbeCommand(cmd);
+  }
+
+  private async handleDemoScript(step: DemoResponse): Promise<void> {
+    switch (step.variant) {
+      case "bubbles_then_connect": {
+        for (const block of step.ux) {
+          this.bus.reply(block, "success");
+        }
+        const ok = await this.synchronizeBackendCredentials(
+          step.backendUrl,
+          step.backendKey,
+        );
+        if (ok) {
+          this.bus.reply(
+            `**Backend synchronized.** ${this.deps.manager.getSessions().length} session(s) · ${this.deps.manager.getTools().length} tool(s) catalogued.`,
+            "success",
+          );
+        }
+        return;
+      }
+      case "bubbles_then_create_session": {
+        for (const line of step.uxBefore) {
+          this.bus.reply(line, "info");
+        }
+        await this.cmdCreateSession(step.name, [], { demo: true });
+        return;
+      }
+      case "native_run": {
+        await this.cmdRun(step.toolId, step.target, {});
+        return;
+      }
+      case "styled_report_placeholder": {
+        this.emitReportCard();
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private emitReportCard(): void {
+    const evidence = getCurlHeadersEvidence();
+    const payload: ReportCardPayload = {
+      finding: "Outdated server header disclosure",
+      severity: "Medium",
+      cvss: "5.3",
+      evidence,
+      remediation:
+        "Remove or obscure the Server response header in your web server configuration",
+      mitre: "T1592 — Gather Victim Host Information",
+    };
+    if (this.bus.reportCard) this.bus.reportCard(payload);
+    else {
+      this.bus.reply(
+        [
+          `### ${payload.finding}`,
+          "",
+          `**Severity:** ${payload.severity} · **CVSS:** ${payload.cvss}`,
+          "",
+          "**Evidence**",
+          "```",
+          evidence,
+          "```",
+          "",
+          `**Remediation:** ${payload.remediation}`,
+          "",
+          `**MITRE ATT&CK:** ${payload.mitre}`,
+        ].join("\n"),
+        "markdown",
+      );
+    }
+  }
+
+  private async dispatchProbeCommand(cmd: Command): Promise<void> {
+    switch (cmd.tag) {
+      case "message":
+        this.bus.reply(cmd.markdown, "assistant");
+        return;
+      case "connect_urls":
+        await this.cmdConnect(cmd.url, cmd.apiKey);
+        return;
+      case "create_session":
+        await this.cmdCreateSession(cmd.sessionName ?? "engagement", []);
+        return;
+      case "tools":
+        this.cmdListTools();
+        return;
+      case "run":
+        await this.cmdRun(cmd.toolId, cmd.target, cmd.args ?? {});
+        return;
+      default:
+        return;
+    }
+  }
+
+  private async synchronizeBackendCredentials(
+    nextUrl: string,
+    nextKey: string,
+  ): Promise<boolean> {
+    const normalized = normalizeBackendUrl(nextUrl);
+    if (!normalized) {
+      this.bus.reply(
+        `\`${nextUrl}\` does not look like a valid URL. Try \`http://localhost:8787\`.`,
+        "error",
+      );
+      return false;
+    }
+    const cfg = vscode.workspace.getConfiguration("pentestIde");
+    await cfg.update("backendUrl", normalized, vscode.ConfigurationTarget.Global);
+    await cfg.update("apiKey", nextKey, vscode.ConfigurationTarget.Global);
+    await this.deps.refreshConfig();
+    probeSetCanonicalTarget(normalized);
+    await this.deps.manager.refresh();
+    this.publishState();
+    return true;
+  }
+
+  private async handleConversational(turn: ConversationalTurn): Promise<void> {
+    switch (turn.kind) {
+      case "greeting":
+        this.bus.reply(
+          [
+            "Hi — I'm the Pentest IDE chat bridge to your backend (**not** the same Cursor model).",
+            "Try:",
+            "`connect http://localhost:8787 YOUR_BACKEND_KEY`",
+            "`create session lab` · `tools` · `run nmap-quick scanme.nmap.org`",
+            "You can also describe goals in plain language (offline keyword routing).",
+          ].join("\n"),
+          "assistant",
+        );
+        return;
+      case "gratitude":
+        this.bus.reply(
+          "You're welcome — run `sessions` anytime to verify state.",
+          "assistant",
+        );
+        return;
+      case "wifi_ambiguous":
+        this.bus.reply(
+          [
+            "**Wi‑Fi / wireless wording:** this extension runs server-side scanners against a **hostname or IP** inside a session.",
+            "",
+            "_You must own or have explicit written authorization for the network._ Pick a gateway / lab host (example `192.168.1.1`) **if allowed**, create a session scoped to it, then say:",
+            "`run nmap-quick 192.168.1.1` — or describe the lab host again with a concrete IP or DNS name.",
+          ].join("\n"),
+          "assistant",
+        );
+        return;
+      case "need_target":
+        this.bus.reply(
+          [
+            `You seem to want **${turn.tool.label}** (\`${turn.tool.id}\`).`,
+            "I need **one hostname or IPv4**, e.g. `scanme.nmap.org`.",
+            `Then: \`run ${turn.tool.id} <that-host>\`.`,
+          ].join("\n"),
+          "assistant",
+        );
+        return;
+      case "suggest_scan": {
+        const head = turn.targets[0];
+        const more =
+          turn.targets.length > 1
+            ? ` _(also saw: ${turn.targets.slice(1).join(", ")} — picking the first)._`
+            : "";
+        this.bus.reply(
+          `Interpreting that as **${turn.tool.label}** on \`${head}\`${more}`,
+          "assistant",
+        );
+        await this.cmdRun(turn.tool.id, head, {});
+        return;
+      }
     }
   }
 
@@ -192,14 +438,8 @@ export class ChatRouter {
       return;
     }
 
-    const cfg = vscode.workspace.getConfiguration("pentestIde");
-    await cfg.update("backendUrl", normalized, vscode.ConfigurationTarget.Global);
-    await cfg.update("apiKey", nextKey, vscode.ConfigurationTarget.Global);
-    await this.deps.refreshConfig();
-
     this.bus.reply(`Connecting to \`${normalized}\`…`, "info");
-    await this.deps.manager.refresh();
-    this.publishState();
+    await this.synchronizeBackendCredentials(normalized, nextKey);
     this.bus.reply(
       `Connected. Loaded **${this.deps.manager.getSessions().length}** session(s) and **${this.deps.manager.getTools().length}** tool(s).`,
       "success",
@@ -308,7 +548,11 @@ export class ChatRouter {
     );
   }
 
-  private async cmdCreateSession(name: string, scope: string[]) {
+  private async cmdCreateSession(
+    name: string,
+    scope: string[],
+    opts?: { demo?: boolean },
+  ) {
     if (!this.hasApiKey()) {
       this.bus.reply(
         "Not connected. Run `connect <url> <api-key>` first.",
@@ -323,6 +567,21 @@ export class ChatRouter {
     const session = await this.deps.manager.createSession({ name, scope });
     this.activeSessionId = session.id;
     this.publishState();
+    if (opts?.demo) {
+      const ts = new Date().toISOString();
+      this.bus.reply(
+        [
+          "### Session created",
+          "",
+          `- **Name:** \`${session.name}\``,
+          `- **ID:** \`${session.id}\``,
+          `- **Timestamp (UTC):** ${ts}`,
+          `- **Phase:** recon`,
+        ].join("\n"),
+        "success",
+      );
+      return;
+    }
     this.bus.reply(
       `Created session \`${session.name}\` and made it active. ${
         scope.length ? `Scope: ${scope.join(", ")}` : "No scope."
@@ -404,16 +663,15 @@ export class ChatRouter {
       return;
     }
 
+    if (tool.id === "curl-headers") {
+      clearProbeEvidence();
+    }
+
     const args = coerceArgs(tool, rawArgs);
     if (args.error) {
       this.bus.reply(args.error, "error");
       return;
     }
-
-    this.bus.reply(
-      `Starting **${tool.label}** against \`${target}\` in session \`${session.name}\`…`,
-      "info",
-    );
 
     let run: RunRecord;
     try {
@@ -429,9 +687,11 @@ export class ChatRouter {
     }
     this.deps.manager.recordRun(run);
 
+    const header = `$ ${run.command.join(" ")}\n# run ${run.id} • started ${new Date(run.startedAt).toLocaleTimeString()}`;
     this.bus.streamStart(
       run.id,
-      `$ ${run.command.join(" ")}\n# run ${run.id} • started ${new Date(run.startedAt).toLocaleTimeString()}`,
+      header,
+      `Running ${tool.label}…`,
     );
 
     // Open the dedicated output channel too so users can grep / search.
@@ -442,6 +702,9 @@ export class ChatRouter {
         onChunk: (c) => {
           channel.append(c.data);
           const stream = c.type === "stderr" ? "stderr" : "stdout";
+          if (tool.id === "curl-headers" && stream === "stdout") {
+            appendCurlHeadersChunk(c.data);
+          }
           this.bus.streamChunk(run.id, c.data, stream);
         },
         onEnd: (final) => {
@@ -560,7 +823,7 @@ export class ChatRouter {
         "- `findings` — open findings panel",
         "- `add finding <title> sev=<critical|high|medium|low|info>`",
         "",
-        "**Natural language examples**",
+        "**Examples**",
         "- _Create a new session named acme-engagement_",
         "- _Run nmap-quick against 10.0.0.1_",
         "- _Show recent runs_",
@@ -610,35 +873,6 @@ export class ChatRouter {
 // Intent parsing — pure, exported for testability.
 // =====================================================================
 
-export type Intent =
-  | { kind: "help" }
-  | { kind: "status" }
-  | { kind: "connect"; url?: string; apiKey?: string }
-  | { kind: "disconnect" }
-  | { kind: "refresh" }
-  | { kind: "listSessions" }
-  | { kind: "listTools" }
-  | { kind: "listRuns" }
-  | { kind: "createSession"; name: string; scope: string[] }
-  | { kind: "deleteSession"; target: string }
-  | { kind: "useSession"; target: string }
-  | {
-      kind: "run";
-      tool: string;
-      target: string;
-      args: Record<string, string>;
-    }
-  | { kind: "openOutput"; index?: number }
-  | { kind: "cancel"; index?: number }
-  | { kind: "findings" }
-  | {
-      kind: "addFinding";
-      title: string;
-      severity: Severity;
-      notes: string;
-    }
-  | { kind: "unknown" };
-
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 
 export function parseIntent(raw: string): Intent {
@@ -666,6 +900,7 @@ export function parseIntent(raw: string): Intent {
     return { kind: "listRuns" };
   if (single === "findings") return { kind: "findings" };
   if (single === "connect") return { kind: "connect" };
+  if (/^reset\s+demo$/i.test(single)) return { kind: "resetDemo" };
 
   // connect <url> [key]
   const connectMatch = /^connect\s+(\S+)(?:\s+(\S+))?$/i.exec(stripped);
