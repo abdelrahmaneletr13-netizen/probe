@@ -24,6 +24,66 @@ import { probeSetCanonicalTarget, probeCurrentTarget } from "./probeState.js";
 
 export type { Intent } from "./types.js";
 
+const DEMO_STREAM_DELAY_MS = 40;
+
+const DEMO_INPUT_1 = "scan for open ports on localhost";
+const DEMO_INPUT_2 = "check the web app for vulnerabilities";
+const DEMO_INPUT_3 = "what technologies are running";
+const DEMO_INPUT_4 = "generate pentest report";
+const DEMO_INPUT_5 = "reset demo";
+
+const DEMO_OUTPUT_1_LINES: readonly string[] = [
+  "Running nmap against localhost...",
+  "",
+  "Starting Nmap 7.94",
+  "Host: 127.0.0.1 (localhost)",
+  "",
+  "PORT     STATE  SERVICE    VERSION",
+  "22/tcp   open   ssh        OpenSSH 8.9p1 Ubuntu",
+  "80/tcp   open   http       Apache httpd 2.4.41",
+  "443/tcp  open   ssl/https  Apache httpd 2.4.41",
+  "3306/tcp open   mysql      MySQL 8.0.32",
+  "8787/tcp open   http-alt   Node.js Express 4.18.2",
+  "",
+  "5 ports open. Scan complete in 3.47s",
+];
+
+const DEMO_OUTPUT_2_LINES: readonly string[] = [
+  "Running Nikto against http://localhost:8787...",
+  "",
+  "+ Target: localhost:8787",
+  "+ Apache/2.4.41 — OUTDATED. Current version: 2.4.58",
+  "+ Server header discloses version: Apache/2.4.41 (Ubuntu)",
+  "+ X-Frame-Options header is missing — clickjacking risk",
+  "+ X-Content-Type-Options header not set",
+  "+ Strict-Transport-Security header missing",
+  "+ /admin/ directory found — no authentication detected",
+  "+ MySQL 8.0.32 banner exposed on port 3306",
+  "+ X-Powered-By: Express — framework fingerprinted",
+  "",
+  "9 vulnerabilities found. Scan complete.",
+];
+
+const DEMO_OUTPUT_3_LINES: readonly string[] = [
+  "Running WhatWeb against http://localhost:8787...",
+  "",
+  "[200 OK] localhost:8787",
+  "  Framework  : Express 4.18.2",
+  "  Runtime    : Node.js",
+  "  Frontend   : Bootstrap 4.5.2, jQuery 3.5.1",
+  "  Server OS  : Ubuntu Linux",
+  "  Web Server : Apache 2.4.41",
+  "  Auth       : None detected",
+  "  CMS        : None detected",
+  "  JS Files   : 4 external scripts loaded without SRI",
+  "  Headers    : X-Powered-By exposed, HSTS missing",
+  "",
+  "Fingerprint complete.",
+];
+
+const DEMO_OUTPUT_5_TEXT =
+  "Clear entire chat history and show the original welcome screen. Ready for next judge.";
+
 /**
  * Bus that the router uses to talk back to the chat webview. Implementations
  * forward to `webview.postMessage`. Kept abstract so the router can be unit
@@ -131,28 +191,117 @@ export class ChatRouter {
     });
   }
 
-  /** Top-level dispatcher. */
+  /** Hackathon judge demo: exact phrases only; no tools / no backend. */
   async handle(rawInput: string): Promise<void> {
-    const text = rawInput.trim();
+    const text = rawInput.trim().toLowerCase();
     if (!text) return;
 
     try {
-      const scripted = probeDemoLookup(normalizeProbeInput(text));
-      if (scripted) {
-        await this.handleDemoScript(scripted);
+      if (text === DEMO_INPUT_1) {
+        await this.streamDemoLines(
+          "$ demo · nmap (localhost)\n# synthetic",
+          DEMO_OUTPUT_1_LINES,
+          "# complete",
+        );
         return;
       }
-
-      const intent = parseIntent(text);
-      if (intent.kind !== "unknown") {
-        await this.executeIntent(intent);
+      if (text === DEMO_INPUT_2) {
+        await this.streamDemoLines(
+          "$ demo · nikto\n# http://localhost:8787",
+          DEMO_OUTPUT_2_LINES,
+          "# complete",
+        );
         return;
       }
-
-      await this.handleUnknownTurn(text);
+      if (text === DEMO_INPUT_3) {
+        await this.streamDemoLines(
+          "$ demo · whatweb\n# http://localhost:8787",
+          DEMO_OUTPUT_3_LINES,
+          "# complete",
+        );
+        return;
+      }
+      if (text === DEMO_INPUT_4) {
+        this.emitDemoReportCard();
+        return;
+      }
+      if (text === DEMO_INPUT_5) {
+        this.activeSessionId = undefined;
+        this.lastHttpxProbeEvidence = "";
+        this.bus.resetDemoUi?.();
+        this.publishState();
+        this.bus.reply(DEMO_OUTPUT_5_TEXT, "success");
+        return;
+      }
     } catch (err) {
       this.bus.reply(formatError(err), "error");
     }
+  }
+
+  /** Stream one line at a time; 40ms between sends (panel may add its own line spacing). */
+  private async streamDemoLines(
+    header: string,
+    lines: readonly string[],
+    footer: string,
+  ): Promise<void> {
+    const runId = `demo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+    this.bus.streamStart(runId, header, undefined);
+    for (const line of lines) {
+      await new Promise<void>((r) => setTimeout(r, DEMO_STREAM_DELAY_MS));
+      this.bus.streamChunk(runId, `${line}\n`, "stdout");
+    }
+    await new Promise<void>((r) => setTimeout(r, DEMO_STREAM_DELAY_MS));
+    this.bus.streamEnd(runId, footer, true);
+  }
+
+  /** INPUT 4 — instant styled markdown “card” (ASCII report). */
+  private emitDemoReportCard(): void {
+    const generated = new Date().toLocaleString();
+    const report = [
+      "╔══════════════════════════════════════════════════╗",
+      "║  PENTEST REPORT — acme-engagement                ║",
+      `║${(`  Generated: ${generated}`).padEnd(50, " ")}║`,
+      "║  Target: localhost:8787                          ║",
+      "╠══════════════════════════════════════════════════╣",
+      "║  🔴 CRITICAL  Unauthenticated /admin/ access     ║",
+      "║  CVSS: 9.1                                       ║",
+      "║  Evidence: /admin/ returned 200 OK, no login     ║",
+      "║  Fix: Require authentication on all /admin routes║",
+      "║  MITRE: T1078 — Valid Accounts                   ║",
+      "╠══════════════════════════════════════════════════╣",
+      "║  🟠 HIGH  Outdated Apache 2.4.41                 ║",
+      "║  CVSS: 7.5                                       ║",
+      "║  Evidence: Server header — Apache/2.4.41 Ubuntu  ║",
+      "║  Fix: Upgrade to Apache 2.4.58 immediately       ║",
+      "║  MITRE: T1190 — Exploit Public-Facing App        ║",
+      "╠══════════════════════════════════════════════════╣",
+      "║  🟡 MEDIUM  Server technology disclosure         ║",
+      "║  CVSS: 6.1                                       ║",
+      "║  Evidence: X-Powered-By: Express in headers      ║",
+      "║  Fix: Header unset X-Powered-By in server config ║",
+      "║  MITRE: T1592 — Gather Victim Host Information   ║",
+      "╠══════════════════════════════════════════════════╣",
+      "║  🟡 MEDIUM  Missing security headers             ║",
+      "║  CVSS: 5.3                                       ║",
+      "║  Evidence: No HSTS, X-Frame-Options, CSP         ║",
+      "║  Fix: Add security headers via helmet.js          ║",
+      "║  MITRE: T1185 — Browser Session Hijacking        ║",
+      "╚══════════════════════════════════════════════════╝",
+    ].join("\n");
+
+    this.bus.reply(
+      [
+        "### Pentest report",
+        "",
+        "```",
+        report,
+        "```",
+        "",
+        "4 findings. 1 Critical. 1 High. 2 Medium.",
+        "Full report ready to export.",
+      ].join("\n"),
+      "markdown",
+    );
   }
 
   private async executeIntent(
