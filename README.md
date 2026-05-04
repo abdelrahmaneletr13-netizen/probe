@@ -1,110 +1,154 @@
-# Pentest IDE
+# PenTest IDE 🛡️
 
-A small **plug-and-play** workbench for security testing from inside your editor.
-
-> **Hosted API** (for the extension): https://pentest-ide-backend.onrender.com — there is no built-in browser console; use the **VS Code / Cursor extension** (or `curl` against `/v1/*` with a bearer key).
-
-```
-┌─────────────────────────┐         HTTPS + SSE          ┌────────────────────────────┐
-│ VS Code / Cursor        │ ───────────────────────────► │ Cloud backend (Fastify)    │
-│ extension/              │     Bearer API key           │ backend/                   │
-│  • Sessions sidebar     │                              │  • /v1/sessions            │
-│  • Tools sidebar        │ ◄─────────────────────────── │  • /v1/tools               │
-│  • Live run output      │     Streamed run chunks      │  • /v1/sessions/:id/runs   │
-└─────────────────────────┘                              │  • Container w/ tools      │
-                                                         └────────────────────────────┘
-```
-
-The backend is a single Docker image that **bundles the API and the
-pentesting tools** (`nmap`, `httpx`, `nikto`, `whatweb`). One `fly deploy` and
-the extension can connect over the internet — no local toolchain required.
+> **FOR AUTHORIZED PENETRATION TESTING ONLY. Unauthorized use against systems 
+> you do not own or have explicit written permission to test is illegal.**
 
 ---
 
-## Layout
+## What is this?
 
-| Path        | What                                                            |
-|-------------|-----------------------------------------------------------------|
-| `backend/`  | Fastify API, tool registry, SSE streaming, vitest tests         |
-| `extension/`| VS Code / Cursor extension (TypeScript, esbuild, vitest tests)  |
-| `docker/`   | `Dockerfile.backend`, `Dockerfile.tools`, `docker-compose.yml`  |
-| `deploy/`   | `fly.toml`, `railway.json`, `render.yaml`                       |
+PenTest IDE is a VS Code extension that acts as an AI copilot for penetration 
+testers. Think Cursor, but for offensive security. Instead of jumping between 
+20 different tools and terminals, you type plain English inside your editor and 
+the AI handles the rest — recon, vulnerability discovery, exploit planning, and 
+report generation.
 
----
-
-## Plug-and-play (recommended)
-
-1. **Deploy the backend.** Pick one:
-   - **Fly.io** → `cd deploy && fly launch --copy-config --no-deploy && fly secrets set PENTEST_IDE_API_KEYS=$(openssl rand -hex 32) && fly deploy`
-   - **Railway** → import the repo, point at `deploy/railway.json`, set `PENTEST_IDE_API_KEYS` secret.
-   - **Render** → connect repo, use `deploy/render.yaml`, set `PENTEST_IDE_API_KEYS` secret.
-2. **Install the extension** (VSIX): `cd extension && npm install && npm run build && npm run package` then `code --install-extension pentest-ide-0.1.0.vsix` (works in Cursor too).
-3. **Connect** via the command palette → `Pentest IDE: Connect to backend`. Paste the deploy URL and your API key.
-4. **Create a session**, pick a tool, enter a target — output streams live into a dedicated VS Code output channel.
+Powered by **Heretic** — an open source abliteration framework that removes 
+safety restrictions from LLMs at the weight level — giving you an AI that 
+actually understands offensive security without fighting you at every step.
 
 ---
 
-## Local development
+## Demo
 
+> "Watch us find a real vulnerability in 60 seconds"The AI runs real security tools, reads the output, and hands back a 
+CVSS-scored, MITRE ATT&CK-mapped findings report ready to send to a client.
+
+---
+
+## How it works
+
+┌─────────────────────────────────────────┐
+│           VS Code Sidebar               │
+│         (Plain English Chat)            │
+└──────────────┬──────────────────────────┘
+│
+┌──────────────▼──────────────────────────┐
+│           Extension Core               │
+│   Context builder · Session state      │
+│   Scope enforcer · Audit logger        │
+└──────────────┬──────────────────────────┘
+│
+┌──────────────▼──────────────────────────┐
+│         Heretic Bridge                  │
+│  Abliterated model running via Ollama   │
+│  Task router · MITRE context injector   │
+│  100% local — no data leaves machine    │
+└──────────────┬──────────────────────────┘
+│
+┌──────────────▼──────────────────────────┐
+│          Tool Layer (Docker)            │
+│  Nmap · Nikto · WhatWeb · sqlmap        │
+│  Metasploit · Hashcat · theHarvester    │
+└─────────────────────────────────────────┘
+---
+
+## Why Heretic?
+
+Every mainstream AI model refuses to discuss offensive security techniques. 
+Heretic surgically removes those refusals at the model weight level before 
+deployment — not a jailbreak, not a prompt trick, a permanent model-level 
+change. The result is an AI that understands exploit chains, CVEs, and payload 
+construction the way a senior pentester does.
+
+The abliterated model runs entirely locally via Ollama. Client data, target 
+scope, and vulnerability findings never touch a third party server.
+
+---
+
+## Stack
+
+- **VS Code Extension** — TypeScript
+- **AI Backend** — Heretic + Ollama (local)
+- **Sidecar** — Python FastAPI (streaming SSE)
+- **Tools** — Docker sandboxed MCP servers
+- **Knowledge Base** — MITRE ATT&CK + NVD + Exploit DB
+- **Memory** — ChromaDB vector store
+
+---
+
+## Features
+
+- 🧠 Plain English → real tool execution
+- 🔒 Scope enforcer — validates targets before any tool fires
+- 📋 Auto-generated CVSS + MITRE ATT&CK reports
+- 🖥️ 100% local — air-gap capable
+- 📁 Audit log on every action for legal cover
+- ⚡ Inline ghost text suggestions on `// pentest:` comments
+
+---
+
+## Setup
+
+### Prerequisites
+- VS Code 1.85+
+- Docker + Docker Compose
+- Ollama (https://ollama.ai)
+- Python 3.11+
+- Node.js 18+
+
+### 1. Run Heretic on your base model (offline, one time)
 ```bash
-# Backend, with hot reload
-cd backend
+# Clone Heretic
+git clone https://github.com/ggerganov/llama.cpp
+# Follow Heretic abliteration instructions to process your base model
+# Load the output into Ollama
+ollama create pentest-model -f ./Modelfile
+```
+
+### 2. Start the backend
+```bash
 cp .env.example .env
-npm install
-npm run dev
-
-# Tests
-npm test
-
-# Or the full stack in Docker
-docker compose -f docker/docker-compose.yml up --build
+# Fill in your Ollama URL and model name
+docker compose up -d
 ```
 
+### 3. Install the extension
 ```bash
-# Extension
 cd extension
 npm install
-npm run build      # bundle
-npm test           # unit tests for client / SSE / manager
+npm run package
+# Install the generated .vsix in VS Code
 ```
 
-To debug the extension live, open `extension/` in VS Code and press `F5`
-("Run Extension" — works in Cursor too).
+### 4. Start a session
+---
+
+## Environment Variables
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_DEFAULT_MODEL=pentest-model
+RECON_MODEL=pentest-model
+EXPLOIT_MODEL=pentest-model
+BRIDGE_PORT=8765
+SHODAN_API_KEY=
+LOG_LEVEL=info
+```
 
 ---
 
-## Safety / scope controls
+## Legal
 
-- API-key auth on every endpoint except `/healthz`.
-- Targets are validated (no shell metacharacters, optional public-only mode,
-  optional allowlist).
-- `MAX_CONCURRENT_RUNS` and per-run wall-clock timeout cap blast radius.
-- Sessions have an optional `scope` list — runs whose target is not in scope
-  are rejected.
-- The container runs as non-root.
+This tool is built for **authorized penetration testing, bug bounty hunting, 
+and security research only**. Every tool execution is validated against a 
+signed engagement scope before running. Every action is audit logged.
 
-> **You are responsible for only scanning systems you have explicit
-> permission to test.** The defaults make it harder to misuse this on
-> private/loopback addresses, but they are not a substitute for written
-> authorization.
+Unauthorized use is illegal under the CFAA and equivalent laws worldwide. 
+The authors take no responsibility for misuse.
 
 ---
 
-## Extending
+## Built at Eureka 2025
 
-Add a new tool by appending to `backend/src/tools/registry.ts`:
-
-```ts
-{
-  id: "subfinder",
-  label: "Subfinder",
-  description: "Passive subdomain enumeration",
-  binary: "subfinder",
-  category: "recon",
-  argsSchema: [],
-  buildCommand: (target) => ["-d", target, "-silent"],
-}
-```
-
-Then add the binary to `docker/Dockerfile.backend`. The extension will pick it
-up on the next `Refresh`.
+Built by Abdel
